@@ -13,7 +13,7 @@ fn main() {
         .collect();
 
     VoronoiBuilder::default()
-        .set_bounding_box(bbox)
+        .set_boundary(bbox)
         .set_sites(sites)
         .build()
         .expect("Expect voronoi");

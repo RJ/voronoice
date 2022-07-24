@@ -1,6 +1,6 @@
 use delaunator::{Point, Triangulation, next_halfedge};
 
-use crate::Voronoi;
+use crate::{Voronoi, ConvexBoundary};
 
 pub(crate) const EQ_EPSILON: f64 = 4. * std::f64::EPSILON;
 
@@ -93,7 +93,7 @@ pub fn abs_diff_eq(a: f64, b: f64, epsilon: f64) -> bool {
 }
 
 /// Given a voronoi and two sites, returns whether they share a common voronoi edge.
-pub fn has_common_voronoi_edge(voronoi: &Voronoi, a: usize, b: usize) -> bool {
+pub fn has_common_voronoi_edge<T: ConvexBoundary>(voronoi: &Voronoi<T>, a: usize, b: usize) -> bool {
     let mut common = 0;
     for &ta in voronoi.cell(a).triangles() {
         for &tb in voronoi.cell(b).triangles() {
@@ -110,9 +110,9 @@ pub fn has_common_voronoi_edge(voronoi: &Voronoi, a: usize, b: usize) -> bool {
 #[cfg(test)]
 pub(crate) mod test {
     use delaunator::Point;
-    use crate::{Voronoi, VoronoiBuilder, BoundingBox};
+    use crate::{Voronoi, VoronoiBuilder, BoundingBox, ConvexBoundary};
 
-    pub fn validate_voronoi(voronoi: &Voronoi) {
+    pub fn validate_voronoi<T: ConvexBoundary>(voronoi: &Voronoi<T>) {
         for cell in voronoi.iter_cells() {
             let vertices: Vec<Point> = cell.iter_vertices().cloned().collect();
 
@@ -121,8 +121,8 @@ pub(crate) mod test {
                 fail(&voronoi, format!("Cell {}: not counter-clockwise. Area is {area}. {:?}", cell.site(), cell.triangles().iter().copied().collect::<Vec<usize>>()));
             }
 
-            vertices.iter().enumerate().filter(|(_, p)| !voronoi.bounding_box().is_inside(p)).for_each(|(v, p)| {
-                fail(&voronoi, format!("Cell {}: vertex {v} {:?} is outside bounding box.", cell.site(), p));
+            vertices.iter().enumerate().filter(|(_, p)| !voronoi.boundary().is_inside(p)).for_each(|(v, p)| {
+                fail(&voronoi, format!("Cell {}: vertex {v} {:?} is outside diagram boundary.", cell.site(), p));
             });
 
             if !is_convex(&vertices) {
@@ -134,7 +134,7 @@ pub(crate) mod test {
             }
         }
 
-        for corner in voronoi.bounding_box().corners() {
+        for corner in voronoi.boundary().vertices() {
             let mut inside = false;
             for cell in voronoi.iter_cells() {
                 let cell_vertices = cell.iter_vertices().cloned().collect();
@@ -150,7 +150,7 @@ pub(crate) mod test {
         }
     }
 
-    pub fn new_voronoi_builder_from_asset(asset: &str) -> std::io::Result<VoronoiBuilder> {
+    pub fn new_voronoi_builder_from_asset(asset: &str) -> std::io::Result<VoronoiBuilder<BoundingBox>> {
         let basepath = "examples/assets/";
 
         let file = std::fs::File::open(basepath.to_string() + asset)?;
@@ -173,7 +173,7 @@ pub(crate) mod test {
 
         Ok(VoronoiBuilder::default()
             .set_sites(sites)
-            .set_bounding_box(BoundingBox::new(center, farthest_distance * 2.0, farthest_distance * 2.0)))
+            .set_boundary(BoundingBox::new(center, farthest_distance * 2.0, farthest_distance * 2.0)))
     }
 
     pub fn assert_list_eq<T>(expected: &[T], actual: &[T], message: &str) where T : std::fmt::Debug + Eq {
@@ -183,7 +183,7 @@ pub(crate) mod test {
         }
     }
 
-    fn fail(voronoi: &Voronoi, message: String) {
+    fn fail<T: ConvexBoundary>(voronoi: &Voronoi<T>, message: String) {
         let path = "test_sites.json";
         let s = format!("{:?}", voronoi.sites());
         std::io::Write::write_all(&mut std::fs::File::create(path).unwrap(), s.as_bytes()).unwrap();
@@ -206,7 +206,7 @@ pub(crate) mod test {
         true
     }
 
-    /// Check that the cell is ordered counter-clockwise and inside the bounding box.
+    /// Check that the cell is ordered counter-clockwise and inside the bounding geometry.
     fn calculate_area(vertices: &Vec<Point>) -> f64 {
         vertices.iter().zip(vertices.iter().cycle().skip(1)).fold(0.0, |acc, (a, b)| {
                 acc + ((b.x - a.x) * (b.y + a.y))

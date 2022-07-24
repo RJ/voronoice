@@ -1,6 +1,6 @@
 use crate::utils::{abs_diff_eq, EQ_EPSILON};
 
-use super::Point;
+use super::{Point, ConvexBoundary};
 
 /// Defines a rectangular bounding box.
 ///
@@ -15,6 +15,8 @@ pub struct BoundingBox {
 
     /// The bottom left point of a rectangle.
     bottom_left: Point,
+
+    vertices: [Point; 4],
 }
 
 impl Default for BoundingBox {
@@ -33,10 +35,20 @@ impl BoundingBox {
     /// * `height` - The bounding box's height
     ///
     pub fn new(center: Point, width: f64, height: f64) -> Self {
+        let left = center.x - width / 2.0;
+        let right = center.x + width / 2.0;
+        let top = center.y - height / 2.0;
+        let bottom = center.y + height / 2.0;
         Self {
-            top_right: Point { x: center.x + width / 2.0, y: center.y - height / 2.0 },
-            bottom_left: Point { x: center.x - width / 2.0, y: center.y + height / 2.0 },
+            top_right: Point { x: right, y: top },
+            bottom_left: Point { x: left, y: bottom},
             center,
+            vertices: [
+                Point { x: left, y: top },
+                Point { x: left, y: bottom },
+                Point { x: right, y: bottom },
+                Point { x: right, y: top },
+            ]
         }
     }
 
@@ -103,40 +115,23 @@ impl BoundingBox {
     pub fn right(&self) -> f64 {
         self.top_right.x
     }
+}
 
-    /// Gets a slice of corners oriented counter-clockwise.
-    pub fn corners(&self) -> [Point; 4] {
-        [
-            Point { x: self.left(), y: self.top() }, // top left
-            self.bottom_left().clone(),
-            Point { x: self.right(), y: self.bottom() }, // bottom right
-            self.top_right().clone(),
-        ]
+impl ConvexBoundary for BoundingBox {
+    fn vertices(&self) -> &[Point] {
+        &self.vertices
     }
 
-    /// Returns whether a given point is inside (or on the edges) of the bounding box.
     #[inline]
-    pub fn is_inside(&self, point: &Point) -> bool {
+    fn is_inside(&self, point: &Point) -> bool {
         let horizonal_ok = point.x >= self.left() && point.x <= self.right();
         let vertical_ok = point.y >= self.top() && point.y <= self.bottom();
 
         horizonal_ok && vertical_ok
     }
 
-    // /// Same as inside, but return false if point is on the box edge.
     #[inline]
-    pub fn is_exclusively_inside(&self, point: &Point) -> bool {
-        self.is_inside(point) && self.which_edge(point).is_none()
-    }
-
-    /// Returns the index of the corner representing the edge ```point``` is on.
-    ///
-    /// corners() method can be called to get the list of corners.
-    ///
-    /// # Example
-    /// If point is on middle of the top edge, the top left corner will be returned.
-    #[inline]
-    pub (crate) fn which_edge(&self, point: &Point) -> Option<usize> {
+    fn which_edge(&self, point: &Point) -> Option<usize> {
         if abs_diff_eq(point.y, self.top(), EQ_EPSILON) {
             // top
             Some(0)
@@ -156,8 +151,12 @@ impl BoundingBox {
         }
     }
 
-    /// Intersects a line represented by points 'a' and 'b' and returns the two intersecting points with the box, or None
-    pub (crate) fn intersect_line(&self, a: &Point, b: &Point) -> (Option<Point>, Option<Point>) {
+    #[inline]
+    fn next_edge(&self, edge: usize) -> usize {
+        (edge + 1) % 4
+    }
+
+    fn intersect_line(&self, a: &Point, b: &Point) -> (Option<Point>, Option<Point>) {
         let c_x = b.x - a.x;
         let c_y = b.y - a.y;
         let c = c_y / c_x;
@@ -229,78 +228,8 @@ impl BoundingBox {
 
         (f.or(g), h.or(i))
     }
-
-    /// Intersects a ray with the bounding box. The first intersection is returned first.
-    pub (crate) fn project_ray(&self, point: &Point, direction: &Point) -> (Option<Point>, Option<Point>) {
-        let b = Point { x: point.x + direction.x, y: point.y + direction.y };
-        let (a, b) = self.intersect_line(point, &b);
-        order_points_on_ray(point, direction, a, b)
-    }
 }
 
-/// Given a ray defined by `point` and `direction`, and two points `a` and `b` on such ray, returns a tuple (w, z) where point <= w <= z.
-/// If either `a` or `b` are smaller than `point`, None is returned.
-pub (crate) fn order_points_on_ray(point: &Point, direction: &Point, a: Option<Point>, b: Option<Point>) -> (Option<Point>, Option<Point>) {
-    match (a,b) {
-        (None, None) => { // no points, no intersection
-            (None, None)
-        }
-        (Some(va), Some(vb)) => { // both a and b are reachable
-            // point a and b are just a scalar times direction, so we can compare any non-zero
-            // direction component, use largest
-            let (d, da, db) = if direction.x.abs() > direction.y.abs() {
-                // use x for comparison
-                (direction.x, va.x - point.x, vb.x - point.x)
-            } else {
-                (direction.y, va.y - point.y, vb.y - point.y)
-            };
-
-            match (d.signum() == da.signum(), d.signum() == db.signum()) {
-                (true, true) => {
-                    if da.abs() > db.abs() {
-                        // b is closer
-                        (Some(vb), Some(va))
-                    } else {
-                        // a is closer
-                        (Some(va), Some(vb))
-                    }
-                },
-                (true, false) => { // only a reachable
-                    (Some(va), None)
-                },
-                (false, true) => { // only b reachably
-                    (Some(vb), None)
-                },
-                (false, false) => { // neither a nor b is reachable, no intersection
-                    (None, None)
-                }
-            }
-        },
-        (Some(va), None) => {
-            if direction.x.signum() == va.x.signum() && direction.y.signum() == va.y.signum() {
-                // a is in the right direction
-                (Some(va), None)
-            } else {
-                // a can't be reached
-                (None, None)
-            }
-        },
-        (None, Some(vb)) => {
-            if direction.x.signum() == vb.x.signum() && direction.y.signum() == vb.y.signum() {
-                // b is in the right direction
-                (Some(vb), None)
-            } else {
-                // b can't be reached
-                (None, None)
-            }
-        }
-    }
-}
-
-#[inline]
-pub (crate) fn next_edge(edge: usize) -> usize {
-    (edge + 1) % 4
-}
 
 #[cfg(test)]
 mod tests {

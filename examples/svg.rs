@@ -46,7 +46,7 @@ struct Args {
     #[clap(short, long, default_value_t = 0)]
     lloyd_iterations: usize,
 
-    /// Number of lloyd iterations to run (None, RemoveSitesOutsideBoundingBoxOnly, Clip)
+    /// Clipping (None, RemoveSitesOutsideBoundaryOnly, Clip)
     #[clap(short, long, default_value_t = ClipBehavior::Clip)]
     clip_behavior: ClipBehavior,
 
@@ -142,14 +142,14 @@ fn main() -> std::io::Result<()> {
     // build voronoi
     let voronoi = VoronoiBuilder::default()
         .set_sites(sites)
-        .set_bounding_box(transform.bounding_box(&args))
+        .set_boundary(transform.bounding_box(&args))
         .set_lloyd_relaxation_iterations(args.lloyd_iterations)
         .set_clip_behavior(args.clip_behavior)
         .build()
         .expect("Couldn't build voronoi");
 
-    let bounding_box_top_left = transform.transform(&Point { x: voronoi.bounding_box().left(), y: voronoi.bounding_box().top() });
-    let bounding_box_side = transform.transform(voronoi.bounding_box().bottom_left()).y - bounding_box_top_left.y;
+    let bounding_box_top_left = transform.transform(&Point { x: voronoi.boundary().left(), y: voronoi.boundary().top() });
+    let bounding_box_side = transform.transform(voronoi.boundary().bottom_left()).y - bounding_box_top_left.y;
 
     // generate SVG
     let contents = format!(
@@ -184,7 +184,7 @@ fn main() -> std::io::Result<()> {
     File::create(args.output_path)?.write_all(contents.as_bytes())
 }
 
-fn render_triangles(transform: &Transform, voronoi: &Voronoi, labels: bool) -> String {
+fn render_triangles(transform: &Transform, voronoi: &Voronoi<BoundingBox>, labels: bool) -> String {
     let triangulation = voronoi.triangulation();
     let points = voronoi.sites();
 
@@ -243,7 +243,7 @@ fn render_point(transform: &Transform, points: &[Point], color: &str, jitter: bo
         })
 }
 
-fn render_circumcenters(transform: &Transform, voronoi: &Voronoi) -> String {
+fn render_circumcenters(transform: &Transform, voronoi: &Voronoi<BoundingBox>) -> String {
     voronoi.vertices().iter().enumerate().fold(String::new(), |acc, (triangle, circumcenter)| {
         if triangle < voronoi.triangulation().triangles.len() / 3  {
             let circumcenter = transform.transform(circumcenter);
@@ -263,7 +263,7 @@ fn render_circumcenters(transform: &Transform, voronoi: &Voronoi) -> String {
     })
 }
 
-fn render_voronoi_edges(transform: &Transform, voronoi: &Voronoi, args: &Args) -> String {
+fn render_voronoi_edges(transform: &Transform, voronoi: &Voronoi<BoundingBox>, args: &Args) -> String {
     let mut buffer = String::new();
 
     for cell in voronoi.iter_cells() {

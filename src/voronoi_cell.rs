@@ -1,6 +1,8 @@
 use std::fmt;
 use delaunator::EMPTY;
 
+use crate::ConvexBoundary;
+
 use super::{
     Voronoi,
     Point,
@@ -11,14 +13,14 @@ use super::{
 ///
 /// Use [Voronoi::cell()] or [Voronoi::iter_cells()] to obtain an instance of this type.
 #[derive(Clone)]
-pub struct VoronoiCell<'v> {
+pub struct VoronoiCell<'v, T: ConvexBoundary> {
     site: usize,
-    voronoi: &'v Voronoi
+    voronoi: &'v Voronoi<T>
 }
 
-impl<'v> VoronoiCell<'v> {
+impl<'v, T: ConvexBoundary> VoronoiCell<'v, T> {
     #[inline]
-    pub (super) fn new(site: usize, voronoi: &'v Voronoi) -> Self {
+    pub (super) fn new(site: usize, voronoi: &'v Voronoi<T>) -> Self {
         Self {
             site,
             voronoi
@@ -32,7 +34,7 @@ impl<'v> VoronoiCell<'v> {
     ///```
     /// use voronoice::*;
     /// let sites = vec![Point { x: 0.0, y: 0.0 }, Point { x: 0.5, y: 0.0 }, Point { x: 0.0, y: 0.5 }];
-    /// let v = VoronoiBuilder::default()
+    /// let v = VoronoiBuilder::<BoundingBox>::default()
     ///     .set_sites(sites.clone())
     ///     .build()
     ///     .unwrap();
@@ -94,7 +96,7 @@ impl<'v> VoronoiCell<'v> {
     ///```
     /// use voronoice::*;
     /// let sites = vec![Point { x: -0.5, y: 0.0 }, Point { x: 0.5, y: 0.0 }, Point { x: 0.0, y: 0.0 }, Point { x: 0.0, y: 0.5 }, Point { x: 0.0, y: -0.5 }];
-    /// let v = VoronoiBuilder::default()
+    /// let v = VoronoiBuilder::<BoundingBox>::default()
     ///     .set_sites(sites.clone())
     ///     .build()
     ///     .unwrap();
@@ -104,7 +106,7 @@ impl<'v> VoronoiCell<'v> {
     /// assert_eq!(neighbors[2], 3);
     ///```
     #[inline]
-    pub fn iter_neighbors(&self) -> NeighborSiteIterator {
+    pub fn iter_neighbors(&self) -> NeighborSiteIterator<T> {
         NeighborSiteIterator::new(self.voronoi, self.site)
     }
 
@@ -116,19 +118,19 @@ impl<'v> VoronoiCell<'v> {
 
     /// Returns a boolean indicating whether this cell is on the hull (edge) of the diagram.
     ///
-    /// A Voronoi cell is on the hull if its associated site is on the Delaunay hull or if clipping is enabled and the cell intersects with the bounding box.
+    /// A Voronoi cell is on the hull if its associated site is on the Delaunay hull or if clipping is enabled and the cell intersects with the bounding geometry.
     pub fn is_on_hull(&self) -> bool {
         // if there is no half-edge associated with the left-most edge, the edge is on the hull
         let incoming_leftmost_edge = self.voronoi.site_to_incoming_leftmost_halfedge[self.site];
         self.voronoi.triangulation.halfedges[incoming_leftmost_edge] == EMPTY
             // if the cell vertex index is higher than the # of triangles/circumcenters, it means the vertex was added either because
-            // it was extending a hull cell or because of clipping (agaisnt bounding box), thus the cell is on the hull
+            // it was extending a hull cell or because of clipping (against boundary), thus the cell is on the hull
             || self.triangles().iter().any(|&t| t > self.voronoi.number_of_triangles())
     }
 }
 
 #[allow(dead_code)]
-impl<'v> fmt::Debug for  VoronoiCell<'v> {
+impl<'v, T: ConvexBoundary> fmt::Debug for  VoronoiCell<'v, T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         #[derive(Debug)]
         struct Edge {

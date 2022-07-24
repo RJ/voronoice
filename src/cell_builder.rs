@@ -1,20 +1,20 @@
 use delaunator::{EMPTY, next_halfedge, Triangulation};
-use crate::{utils::{triangle_of_edge}, BoundingBox, bounding_box};
+use crate::{utils::{triangle_of_edge}, boundary, ConvexBoundary};
 use super::{ClipBehavior, Point, iterator::EdgesAroundSiteIterator, utils::{self, site_of_incoming}};
 
 const VORONOI_INFINITY: f64 = 1e+10_f64;
 
 #[derive(Debug)]
-pub struct CellBuilder<'t> {
+pub struct CellBuilder<'t, T: ConvexBoundary> {
     triangulation: &'t Triangulation,
     sites: &'t Vec<Point>,
     vertices: Vec<Point>,
     site_to_incoming_leftmost_halfedge: Vec<usize>,
-    corner_ownership: Vec<usize>,
-    is_vertex_inside_bounding_box: Vec<bool>,
-    bounding_box: BoundingBox,
+    boundary_vertex_ownership: Vec<usize>,
+    is_vertex_inside_boundary: Vec<bool>,
+    boundary: T,
     clip_behavior: ClipBehavior,
-    first_corner_index: usize,
+    first_boundary_vertex_index: usize,
     number_of_circumcenters: usize,
 }
 
@@ -24,13 +24,13 @@ pub struct CellBuilderResult {
     pub site_to_incoming_leftmost_halfedge: Vec<usize>,
 }
 
-impl<'t> CellBuilder<'t> {
-    pub fn new(triangulation: &'t Triangulation, sites: &'t Vec<Point>, vertices: Vec<Point>, bounding_box: BoundingBox, clip_behavior: ClipBehavior) -> Self {
+impl<'t, T: ConvexBoundary> CellBuilder<'t, T> {
+    pub fn new(triangulation: &'t Triangulation, sites: &'t Vec<Point>, vertices: Vec<Point>, boundary: T, clip_behavior: ClipBehavior) -> Self {
         let site_to_incoming_leftmost_halfedge = calculate_incoming_edges(triangulation, sites.len());
-        let is_vertex_inside_bounding_box: Vec<bool> = vertices.iter().map(|c| bounding_box.is_inside(c)).collect();
+        let is_vertex_inside_boundary: Vec<bool> = vertices.iter().map(|c| boundary.is_inside(c)).collect();
 
-        let corner_ownership = if clip_behavior == ClipBehavior::Clip {
-            calculate_corner_ownership(&bounding_box.corners(), &triangulation, sites, &site_to_incoming_leftmost_halfedge)
+        let boundary_vertex_ownership = if clip_behavior == ClipBehavior::Clip {
+            calculate_boundary_vertex_ownership(&boundary.vertices(), &triangulation, sites, &site_to_incoming_leftmost_halfedge)
         } else {
             Vec::with_capacity(0)
         };
@@ -39,20 +39,20 @@ impl<'t> CellBuilder<'t> {
             triangulation,
             sites,
             site_to_incoming_leftmost_halfedge,
-            is_vertex_inside_bounding_box,
-            corner_ownership,
-            first_corner_index: 0,
+            is_vertex_inside_boundary,
+            boundary_vertex_ownership,
+            first_boundary_vertex_index: 0,
             number_of_circumcenters: vertices.len(),
             vertices,
-            bounding_box,
+            boundary,
             clip_behavior
         }
     }
 
     pub fn build(mut self) -> CellBuilderResult {
-        // adds the corners of the bounding box as potential vertices for the voronoi
+        // adds the vertices of the boundary as potential vertices for the voronoi
         if self.clip_behavior == ClipBehavior::Clip {
-            self.calculate_corners();
+            self.calculate_boundary_vertices();
         }
 
         let cells = self.build_cells();
@@ -64,18 +64,18 @@ impl<'t> CellBuilder<'t> {
         }
     }
 
-    pub fn calculate_corners(&mut self) {
-        // add all corners to the vertice list as they will be used for closing cells
+    pub fn calculate_boundary_vertices(&mut self) {
+        // add all boundary vertices to the vertex list as they will be used for closing cells
 
-        self.first_corner_index = self.vertices.len();
-        for corner in self.bounding_box.corners() {
-            self.vertices.push(corner);
+        self.first_boundary_vertex_index = self.vertices.len();
+        for bv in self.boundary.vertices() {
+            self.vertices.push(bv.clone());
         }
     }
 
     /// Builds cells for each site.
     /// This won't extend not close the hull.
-    /// This will not clip any edges to the bounding box.
+    /// This will not clip any edges to the bounding geometry.
     fn build_cells(&mut self) -> Vec<Vec<usize>> {
         let triangulation = self.triangulation;
         let sites: &Vec<Point> = self.sites;
@@ -84,7 +84,7 @@ impl<'t> CellBuilder<'t> {
         let mut tmp_cell = Vec::new();
 
         if self.clip_behavior == ClipBehavior::Clip {
-            // For each hull edge a->b, extend its associated circumcenter vertex beyond the bounding box
+            // For each hull edge a->b, extend its associated circumcenter vertex beyond the boundary
             // Add this extended vertex to its cell, and the hull previous cell that shares the same extended vertex
             for (&a, &b) in triangulation.hull.iter().zip(triangulation.hull.iter().cycle().skip(1)) {
                 let hull_edge = self.site_to_incoming_leftmost_halfedge[b];
@@ -138,11 +138,11 @@ impl<'t> CellBuilder<'t> {
     fn clip_cell(&mut self, tmp_cell: &Vec<usize>, cell: &mut Vec<usize>, site: usize) {
         #[cfg(debug_logs)] println!("  Temp: {:?}", tmp_cell);
 
-        // find the first vertex inside the bounding box
-        let (first_index, first, first_inside) = if let Some(inside) = tmp_cell.iter().enumerate().filter(|(_, &c)| self.is_vertex_inside_bounding_box(c)).next() {
+        // find the first vertex inside the boundary
+        let (first_index, first, first_inside) = if let Some(inside) = tmp_cell.iter().enumerate().filter(|(_, &c)| self.is_vertex_inside_boundary(c)).next() {
             (inside.0, *inside.1, true)
         } else {
-            // when cell is entirely outside the bounding box, it will always fall into the loop case below that the edge needs to be clipped
+            // when cell is entirely outside the boundary, it will always fall into the loop case below that the edge needs to be clipped
             (0, tmp_cell[0], false)
         };
 
@@ -152,49 +152,49 @@ impl<'t> CellBuilder<'t> {
         let mut cell_open = false; // everytime we leave the cell, we leave it open and we need to close it
         #[cfg(debug_logs)] println!("  Start: Temp[{first_index}] = {first}.");
         for &c in tmp_cell.iter().rev().cycle().skip(tmp_cell.len() - first_index).take(tmp_cell.len()) {
-            let inside = self.is_vertex_inside_bounding_box(c);
+            let inside = self.is_vertex_inside_boundary(c);
 
             match (prev_inside, inside) {
-                // voronoi edge has both vertices outside bounding box
+                // voronoi edge has both vertices outside boundary
                 (false, false) => {
-                    // but may cross the box, so check for an intersection
+                    // but may cross the boundary, so check for an intersection
                     let (first_clip, second_clip) = self.clip_voronoi_edge(prev, c);
                     if let Some(first_clip) = first_clip {
                         if cell_open {
-                            // an edge crossing the box still leaves the cell open, but it may be able to wrap around a corner
+                            // an edge crossing the box still leaves the cell open, but it may be able to wrap around a boundary vertex
                             // this is an edge case, see degerated10.json input
-                            self.insert_edge_and_wrap_around_corners(site, cell,
-                                *cell.last().expect("Cell must not be empty because we started from a vertex inside the bounding box."),
+                            self.insert_edge_and_wrap_around_boundary_vertices(site, cell,
+                                *cell.last().expect("Cell must not be empty because we started from a vertex inside the boundary."),
                                 first_clip);
                             #[cfg(debug_logs)] println!("  [{site}] Edge {prev} -> {c}. Edge outside box. The box was open.");
                         }
                         #[cfg(debug_logs)] println!("  [{site}] Edge {prev} -> {c}. First clip: {first_clip}. Second clip: {}", second_clip.unwrap_or_default());
-                        self.insert_edge_and_wrap_around_corners(site, cell,
+                        self.insert_edge_and_wrap_around_boundary_vertices(site, cell,
                            first_clip,
-                second_clip.expect("Two intersection points need to occur when a line crosses the bounding box"));
+                second_clip.expect("Two intersection points need to occur when a line crosses the convex boundary"));
                         #[cfg(debug_logs)] println!("  [{site}] Edge {prev} -> {c}. Edge outside box. Entered at {} and left at {}", first_clip, second_clip.unwrap());
                     } else {
                         #[cfg(debug_logs)] println!("  [{site}] Edge {prev} -> {c}. Edge outside box, no intersection.");
                     }
                 },
 
-                // entering bounding box - edge crosses bounding box edge from the outside
+                // entering boundary - edge crosses boundary edge from the outside
                 (false, true) => {
                     let (first_clip, second_clip) = self.clip_voronoi_edge(c, prev);
                     let first_clip = first_clip.expect("Edge crosses box, intersection must exist.");
-                    debug_assert!(second_clip.is_none(), "Cannot have two intersections with the bounding box when one of the edge's vertex is inside the bounding box");
-                    self.insert_edge_and_wrap_around_corners(site, cell,
-                        *cell.last().expect("Cell must not be empty because we started from a vertex inside the bounding box."),
+                    debug_assert!(second_clip.is_none(), "Cannot have two intersections with the boundary when one of the edge's vertex is inside the boundary");
+                    self.insert_edge_and_wrap_around_boundary_vertices(site, cell,
+                        *cell.last().expect("Cell must not be empty because we started from a vertex inside the boundary."),
                        first_clip);
                     cell_open = false;
                     #[cfg(debug_logs)] println!("  [{site}] Edge {prev} -> {c}: Entering box at {first_clip} (previously left from {})");
                 },
 
-                // leaving bounding box - edge crosses bounding box edge from the inside
+                // leaving boundary - edge crosses boundary edge from the inside
                 (true, false) => {
                     let (first_clip, second_clip) = self.clip_voronoi_edge(prev, c);
                     let first_clip = first_clip.expect("Edge crosses box, intersection must exist.");
-                    debug_assert!(second_clip.is_none(), "Cannot have two intersections with the bounding box when one of the edge's vertex is inside the bounding box");
+                    debug_assert!(second_clip.is_none(), "Cannot have two intersections with the boundary when one of the edge's vertex is inside the boundary");
 
                     cell.push(prev);
                     cell.push(first_clip);
@@ -214,9 +214,9 @@ impl<'t> CellBuilder<'t> {
         }
     }
 
-    /// Clip a voronoi edge on the bounding box's edge, if the edge crosses the bounding box.
+    /// Clip a voronoi edge on the edge of the bounding geometry, if the edge crosses the boundary.
     ///
-    /// The edge may cross the bounding box once (when ```a``` is inside the box) or twice (when ```a``` and ```b``` are outside the box).
+    /// The edge may cross the bounding geometry once (when ```a``` is inside the boundary) or twice (when ```a``` and ```b``` are outside the boundary).
     /// Returns up to two indexes to the new vertex where the clip has occured.
     /// * edge is oriented a -> b, i.e. a comes before b
     fn clip_voronoi_edge(&mut self, a: usize, b: usize) -> (Option<usize>, Option<usize>) {
@@ -224,18 +224,18 @@ impl<'t> CellBuilder<'t> {
         let b_pos = &self.vertices[b];
         let a_to_b = &Point { x: b_pos.x - a_pos.x, y: b_pos.y - a_pos.y };
 
-        let result = match self.bounding_box.project_ray(a_pos, a_to_b) {
-            // single intersection (i.e a is inside bounding box and b is outside)
+        let result = match self.boundary.project_ray(a_pos, a_to_b) {
+            // single intersection (i.e a is inside boundary and b is outside)
             (Some(first_clip), None) => {
                 // insert intersection and return
                 (Some(self.add_new_vertex(first_clip)), None)
             },
 
-            // two intersecting points (i.e. a and b are outside bounding box but a->b cross bounding box)
+            // two intersecting points (i.e. a and b are outside boundary but a->b crosses it)
             (Some(first_clip), Some(second_clip)) => {
-                // it is possible that a -> b intersects the bounding box in a point after b, i.e. the edge does not cross the box
+                // it is possible that a -> b intersects the boundary in a point after b, i.e. the edge does not cross the box
                 // check if first_clip comes before b
-                if bounding_box::order_points_on_ray(a_pos, a_to_b, Some(b_pos.clone()), Some(first_clip.clone())).0 == Some(first_clip.clone()) {
+                if boundary::order_points_on_ray(a_pos, a_to_b, Some(b_pos.clone()), Some(first_clip.clone())).0 == Some(first_clip.clone()) {
                     (Some(self.add_new_vertex(first_clip)), Some(self.add_new_vertex(second_clip)))
                 } else {
                     // a -> b -> box: no intersection
@@ -253,38 +253,38 @@ impl<'t> CellBuilder<'t> {
         result
     }
 
-    /// Given two vertices on the bounding box boundary (first clip and second clip) check whether there is a need to add the bounding box corners in the cell
-    fn insert_edge_and_wrap_around_corners(&mut self, site: usize, cell: &mut Vec<usize>, first_clip: usize, second_clip: usize) {
+    /// Given two vertices on the bounding geometry (first clip and second clip) check whether there is a need to add the boundary vertices in the cell
+    fn insert_edge_and_wrap_around_boundary_vertices(&mut self, site: usize, cell: &mut Vec<usize>, first_clip: usize, second_clip: usize) {
         if cell.last() != Some(&first_clip) {
             cell.push(first_clip);
         }
 
-        let first_edge = self.bounding_box.which_edge(&self.vertices[first_clip]).expect("First clipped value is expected to be on the edge of the bounding box.");
-        let second_edge = self.bounding_box.which_edge(&self.vertices[second_clip]).expect("Second clipped value is expected to be on the edge of the bounding box.");
+        let first_edge = self.boundary.which_edge(&self.vertices[first_clip]).expect("First clipped value is expected to be on the edge of the boundary.");
+        let second_edge = self.boundary.which_edge(&self.vertices[second_clip]).expect("Second clipped value is expected to be on the edge of the boundary.");
         #[cfg(debug_logs)] let len = cell.len();
 
         // first_edge is to the right of first_clip -> second_clip
         // second_edge is to the left of first_clip -> second_clip
-        if self.corner_ownership[first_edge] == site {
-            // first_edge and all corners counter clockwise need to be added to this cell
+        if self.boundary_vertex_ownership[first_edge] == site {
+            // first_edge and all boundary vertices counter clockwise need to be added to this cell
             let mut edge = first_edge;
-            while edge != second_edge && self.corner_ownership[edge] == site {
-                cell.push(self.first_corner_index + edge);
-                self.corner_ownership[edge] = EMPTY; // prevent another edge from duplicating this corner in the cell
-                edge = bounding_box::next_edge(edge);
+            while edge != second_edge && self.boundary_vertex_ownership[edge] == site {
+                cell.push(self.first_boundary_vertex_index + edge);
+                self.boundary_vertex_ownership[edge] = EMPTY; // prevent another edge from duplicating this boundary vertex in the cell
+                edge = self.boundary.next_edge(edge);
             }
             cell.push(second_clip);
-        } else if self.corner_ownership[second_edge] == site {
-            // second_edge and all corners clockwise need to be added to this cell
+        } else if self.boundary_vertex_ownership[second_edge] == site {
+            // second_edge and all boundary vertices clockwise need to be added to this cell
             cell.push(second_clip);
             let mut edge = second_edge;
-            while edge != first_edge && self.corner_ownership[edge] == site {
-                cell.push(self.first_corner_index + edge);
-                self.corner_ownership[edge] = EMPTY;
-                edge = bounding_box::next_edge(edge);
+            while edge != first_edge && self.boundary_vertex_ownership[edge] == site {
+                cell.push(self.first_boundary_vertex_index + edge);
+                self.boundary_vertex_ownership[edge] = EMPTY;
+                edge = self.boundary.next_edge(edge);
             }
         } else {
-            // line first_clip -> second_clip crosses the box but does not need to wrap around corners
+            // line first_clip -> second_clip crosses the box but does not need to wrap around boundary vertices
             cell.push(second_clip);
         }
 
@@ -301,7 +301,7 @@ impl<'t> CellBuilder<'t> {
         let b_pos = &self.sites[b];
 
         // the projection direction is orthogonal to the hull's edge (a -> b)
-        // put it just beyong bounding box edge
+        // put it just beyond boundary edge
         let mut orthogonal = Point { x: a_pos.y - b_pos.y , y: b_pos.x - a_pos.x };
 
         // normalizing the orthogonal vector
@@ -317,8 +317,8 @@ impl<'t> CellBuilder<'t> {
         v
     }
 
-    fn is_vertex_inside_bounding_box(&self, vertex: usize) -> bool {
-        *self.is_vertex_inside_bounding_box.get(vertex).unwrap_or(&false)
+    fn is_vertex_inside_boundary(&self, vertex: usize) -> bool {
+        *self.is_vertex_inside_boundary.get(vertex).unwrap_or(&false)
     }
 
     /// Adds a new vertex if it doesn't already exist.
@@ -340,31 +340,31 @@ impl<'t> CellBuilder<'t> {
     }
 }
 
-/// Calculates to which sites each corner belongs to.
-fn calculate_corner_ownership(corners: &[Point], triangulation: &Triangulation, sites: &Vec<Point>, site_to_incoming_leftmost_halfedge: &Vec<usize>) -> Vec<usize> {
-    // corners counter-clockwise
-    let mut corner_owners: Vec<usize> = Vec::with_capacity(corners.len());
+/// Calculates to which sites each boundary vertex belongs to.
+fn calculate_boundary_vertex_ownership(boundary_vertices: &[Point], triangulation: &Triangulation, sites: &Vec<Point>, site_to_incoming_leftmost_halfedge: &Vec<usize>) -> Vec<usize> {
+    // vertices counter-clockwise
+    let mut vertex_owners: Vec<usize> = Vec::with_capacity(boundary_vertices.len());
 
     // the end of the shortest path between any site and a point is the site containing that point
-    // we use this to figure out which sites own which corners
+    // we use this to figure out which sites own which boundary vertices
     // the site we use to build the path does not matter, but picking a closer site to start with is most efficient
-    // thus we use the owning site for the last corner to calculate the next
+    // thus we use the owning site for the last boundary vertex to calculate the next
     let mut site = *triangulation.hull.first().expect("Hull is at least a triangle.");
-    for corner in corners {
+    for vertex in boundary_vertices {
         let owner = crate::iterator::shortest_path_iter_from_triangulation(
             triangulation,
             sites,
             site_to_incoming_leftmost_halfedge,
             site,
-            corner.clone())
+            vertex.clone())
             .last()
             .expect("There must be one site that is the closest.");
 
         site = owner;
-        corner_owners.push(owner);
+        vertex_owners.push(owner);
     }
 
-    corner_owners
+    vertex_owners
 }
 
 fn calculate_incoming_edges(triangulation: &Triangulation, num_of_sites: usize) -> Vec<usize> {

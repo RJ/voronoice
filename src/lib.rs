@@ -19,7 +19,7 @@
 //! // builds a voronoi diagram from the set of sites above, bounded by a square of size 4
 //! let my_voronoi = VoronoiBuilder::default()
 //!     .set_sites(sites)
-//!     .set_bounding_box(BoundingBox::new_centered_square(4.0))
+//!     .set_boundary(BoundingBox::new_centered_square(4.0))
 //!     .set_lloyd_relaxation_iterations(5)
 //!     .build()
 //!     .unwrap();
@@ -44,14 +44,12 @@
 //!     all_voronoi_cell_vertices[indexed_voronoi_cells[0][0]]);
 //!```
 
-mod bounding_box;
+mod boundary;
 mod cell_builder;
 mod voronoi_cell;
 mod iterator;
 mod utils;
 mod voronoi_builder;
-
-use std::{fmt::Display, str::FromStr};
 
 use delaunator::{EMPTY, Triangulation, triangulate};
 use self::{
@@ -60,62 +58,22 @@ use self::{
 };
 
 pub use voronoi_builder::VoronoiBuilder;
-pub use bounding_box::BoundingBox;
+pub use boundary::{BoundingBox, ClipBehavior, ConvexBoundary};
 pub use voronoi_cell::VoronoiCell;
 pub use iterator::TopologicalNeighborSiteIterator;
 pub use iterator::NeighborSiteIterator;
 pub use iterator::CellPathIterator;
 pub use delaunator::Point;
 
-/// Defines how Voronoi generation will handle clipping of Voronoi cell edges within the bounding box.
-///
-/// Clipping is necessary to guarantee that all Voronoi vertices are within the bounding box boundary.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum ClipBehavior {
-    /// No clipping will be performed. Any sites outside the bounding box will still be used for diagram generation.
-    None,
-
-    /// Removes any sites outside the bounding box, but does not perform any further clipping of Voronoi cells that may end up outside of the bounding box.
-    RemoveSitesOutsideBoundingBoxOnly,
-
-    /// Removes sites outside bounding box and clips any Voronoi cell edges that fall outside of the bounding box.
-    Clip,
-}
-
-impl Default for ClipBehavior {
-    fn default() -> Self {
-        ClipBehavior::Clip
-    }
-}
-
-impl Display for ClipBehavior {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self)
-    }
-}
-
-impl FromStr for ClipBehavior {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "None" => Ok(Self::None),
-            "RemoveSitesOutsideBoundingBoxOnly" => Ok(Self::RemoveSitesOutsideBoundingBoxOnly),
-            "Clip" => Ok(Self::Clip),
-            _ => Err("Invalid option".to_string())
-        }
-    }
-}
-
 /// The dual Delaunay-Voronoi graph.
 ///
 /// To obtain an instance of this type, use [VoronoiBuilder].
 #[derive(Clone)]
-pub struct Voronoi {
+pub struct Voronoi<T: ConvexBoundary> {
     /// These are the sites of each voronoi cell.
     sites: Vec<Point>,
 
-    bounding_box: BoundingBox,
+    boundary: T,
     triangulation: Triangulation,
     clip_behavior: ClipBehavior,
 
@@ -123,7 +81,7 @@ pub struct Voronoi {
     ///
     /// For a given voronoi cell, its vertices are the circumcenters of its associated triangles.
     /// Values whose indexes are greater than sites.len() - 1 are not actual triangle circumcenters but
-    /// voronoi cell vertices added to close sites on the convex hull or otherwise used for clipping edges that fell outside the bounding box region.
+    /// voronoi cell vertices added to close sites on the convex hull or otherwise used for clipping edges that fell outside the bounding geometry.
     circumcenters: Vec<Point>,
 
     /// A map of each site to its left-most incomig half-edge.
@@ -134,7 +92,7 @@ pub struct Voronoi {
     cells: Vec<Vec<usize>>
 }
 
-impl std::fmt::Debug for Voronoi {
+impl<T: ConvexBoundary> std::fmt::Debug for Voronoi<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         f.debug_struct("Voronoi")
             .field("sites", &self.sites)
@@ -148,11 +106,11 @@ impl std::fmt::Debug for Voronoi {
 // So you can say that the starting edge indexes the triangle
 // For instances, diag.triangles.len() is the number of starting edges and triangles in the triangulation, you can think of diag.triangles[e] as 'e' as being both the index of the
 // starting edge and the triangle it represents. When dealing with an arbitraty edge, it may not be a starting edge. You can get the starting edge by dividing the edge by 3 and flooring it.
-impl Voronoi {
-    fn new(sites: Vec<Point>, bounding_box: BoundingBox, clip_behavior: ClipBehavior) -> Option<Self> {
-        // remove any points not within bounding box
+impl<T: ConvexBoundary> Voronoi<T> {
+    fn new(sites: Vec<Point>, boundary: T, clip_behavior: ClipBehavior) -> Option<Self> {
+        // remove any points not within the boundary
         let sites = match clip_behavior {
-            ClipBehavior::RemoveSitesOutsideBoundingBoxOnly | ClipBehavior::Clip => sites.into_iter().filter(|p| bounding_box.is_inside(p)).collect::<Vec<Point>>(),
+            ClipBehavior::RemoveSitesOutsideBoundaryOnly | ClipBehavior::Clip => sites.into_iter().filter(|p| boundary.is_inside(p)).collect::<Vec<Point>>(),
             ClipBehavior::None => sites
         };
 
@@ -173,11 +131,11 @@ impl Voronoi {
         ).collect();
 
         // create cell builder to build cells and update circumcenters
-        let cell_builder = CellBuilder::new(&triangulation, &sites, circumcenters, bounding_box.clone(), clip_behavior);
+        let cell_builder = CellBuilder::new(&triangulation, &sites, circumcenters, boundary.clone(), clip_behavior);
         let result = cell_builder.build();
 
         Some(Voronoi {
-            bounding_box,
+            boundary,
             site_to_incoming_leftmost_halfedge: result.site_to_incoming_leftmost_halfedge,
             triangulation,
             sites,
@@ -199,7 +157,7 @@ impl Voronoi {
     /// # Examples
     ///```
     /// use voronoice::*;
-    /// let v = VoronoiBuilder::default()
+    /// let v = VoronoiBuilder::<BoundingBox>::default()
     ///     .generate_square_sites(10)
     ///     .build()
     ///     .unwrap();
@@ -207,13 +165,13 @@ impl Voronoi {
     ///     v.cell(0).iter_vertices().collect::<Vec<&Point>>());
     ///```
     #[inline]
-    pub fn cell(&self, site: usize) -> VoronoiCell {
+    pub fn cell(&self, site: usize) -> VoronoiCell<T> {
         VoronoiCell::new(site, self)
     }
 
     /// Gets an iterator to walk through all Voronoi cells.
     /// Cells are iterated in order with the vector returned by [Self::sites()].
-    pub fn iter_cells<'v>(&'v self) -> impl Iterator<Item = VoronoiCell<'v>> + Clone {
+    pub fn iter_cells<'v>(&'v self) -> impl Iterator<Item = VoronoiCell<'v, T>> + Clone {
         (0..self.sites.len())
             .map(move |s| self.cell(s))
     }
@@ -226,7 +184,7 @@ impl Voronoi {
     /// # Examples
     ///```
     /// use voronoice::*;
-    /// let v = VoronoiBuilder::default()
+    /// let v = VoronoiBuilder::<BoundingBox>::default()
     ///     .generate_square_sites(10)
     ///     .build()
     ///     .unwrap();
@@ -262,9 +220,9 @@ impl Voronoi {
         &self.triangulation
     }
 
-    /// Gets a reference to the bounding box.
-    pub fn bounding_box(&self) -> &BoundingBox {
-        &self.bounding_box
+    /// Gets a reference to the bounding geometry.
+    pub fn boundary(&self) -> &T {
+        &self.boundary
     }
 
     /// Gets the number of Delaunay triangles.
@@ -278,7 +236,7 @@ mod tests {
     use rand::Rng;
     use super::*;
 
-    fn create_random_builder(size: usize) -> VoronoiBuilder {
+    fn create_random_bounding_box_builder(size: usize) -> VoronoiBuilder<BoundingBox> {
         let mut rng = rand::thread_rng();
         let builder = VoronoiBuilder::default();
         let bbox = BoundingBox::default();
@@ -290,13 +248,13 @@ mod tests {
             .collect();
 
         builder
-            .set_bounding_box(bbox)
+            .set_boundary(bbox)
             .set_sites(sites)
     }
 
     #[test]
     fn random_100_000_site_generation_test() {
-        let voronoi = create_random_builder(100_000)
+        let voronoi = create_random_bounding_box_builder(100_000)
             .build()
             .expect("Some voronoi expected.");
 
@@ -306,7 +264,7 @@ mod tests {
     #[test]
     fn random_15_site_generation_test() {
         for _ in 0..1000 {
-            let voronoi = create_random_builder(15)
+            let voronoi = create_random_bounding_box_builder(15)
                 .build()
                 .expect("Some voronoi expected.");
 
@@ -340,7 +298,7 @@ mod tests {
 
     #[test]
     fn collinear_sites() {
-        let voronoi = VoronoiBuilder::default()
+        let voronoi = VoronoiBuilder::<BoundingBox>::default()
             .set_sites([ Point { x: 0.0, y: 0.0 }, Point { x: 0.0, y: 1.0 }, Point { x: 0.0, y: 2.0 } ].to_vec())
             .build();
 

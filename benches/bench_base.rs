@@ -2,7 +2,7 @@ use criterion::{BatchSize, Bencher};
 use rand::Rng;
 use voronoice::{BoundingBox, Point, VoronoiBuilder};
 
-pub fn create_random_builder(size: usize) -> VoronoiBuilder {
+pub fn create_random_builder(size: usize) -> VoronoiBuilder<BoundingBox> {
     let mut rng = rand::thread_rng();
     let builder = VoronoiBuilder::default();
     let bbox = BoundingBox::default();
@@ -14,7 +14,7 @@ pub fn create_random_builder(size: usize) -> VoronoiBuilder {
         .collect();
 
     builder
-        .set_bounding_box(bbox)
+        .set_boundary(bbox)
         .set_sites(sites)
 }
 

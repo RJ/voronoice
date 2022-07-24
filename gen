@@ -9,4 +9,4 @@ else
 fi
 
 cargo run --example svg -- $input -o example.svg -w sites.json
-cargo run --example svg -- -p sites.json -c RemoveSitesOutsideBoundingBoxOnly -o orig.svg $sinput 1> /dev/null
+cargo run --example svg -- -p sites.json -c RemoveSitesOutsideBoundaryOnly -o orig.svg $sinput 1> /dev/null

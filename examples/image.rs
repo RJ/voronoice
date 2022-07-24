@@ -26,7 +26,7 @@ fn main() {
         .set_sites(sites)
         .set_clip_behavior(voronoice::ClipBehavior::None)
         // image origin is top left corner, center is width/2,height/2
-        .set_bounding_box(BoundingBox::new(Point { x: width as f64 / 2.0, y: height as f64 / 2.0 }, width as f64, height as f64))
+        .set_boundary(BoundingBox::new(Point { x: width as f64 / 2.0, y: height as f64 / 2.0 }, width as f64, height as f64))
         .build()
         .unwrap();
 
@@ -88,7 +88,7 @@ fn main() {
     img.save("out.jpg").unwrap();
 }
 
-fn get_cell(voronoi: &Voronoi, current_site: usize, x: u32, y: u32) -> usize {
+fn get_cell(voronoi: &Voronoi<BoundingBox>, current_site: usize, x: u32, y: u32) -> usize {
     let p = Point { x: x as f64, y: y as f64 };
     voronoi
         .cell(current_site)

@@ -1,5 +1,5 @@
 use delaunator::{Point, Triangulation, next_halfedge};
-use crate::{Voronoi, utils::{dist2, site_of_incoming, self}};
+use crate::{Voronoi, utils::{dist2, site_of_incoming, self}, ConvexBoundary};
 
 use super::{EMPTY};
 
@@ -63,7 +63,7 @@ pub struct TopologicalNeighborSiteIterator<'t> {
 
 impl<'t> TopologicalNeighborSiteIterator<'t> {
     /// Creates iterator based on the site.
-    pub fn new(voronoi: &'t Voronoi, site: usize) -> Self {
+    pub fn new<T: ConvexBoundary>(voronoi: &'t Voronoi<T>, site: usize) -> Self {
         Self::with_triangulation(voronoi.triangulation(), &voronoi.site_to_incoming_leftmost_halfedge, site)
     }
 
@@ -105,16 +105,16 @@ impl<'t> Iterator for TopologicalNeighborSiteIterator<'t> {
 ///
 /// This iterator expands on [TopologicalNeighborSiteIterator] by taking into account the clipping effect of voronoi edges to decide whether two sites are neighbors.
 /// In this iterator, two sites are considered neighbors if their voronoi cells share a common edge in the voronoi graph.
-/// Sites on the hull may get disconnected by this classification if their common voronoi edge gets clipped away because it lies beyond the bounding box.
+/// Sites on the hull may get disconnected by this classification if their common voronoi edge gets clipped away because it lies beyond the bounding geometry.
 #[derive(Clone, Debug)]
-pub struct NeighborSiteIterator<'t> {
-    voronoi: &'t Voronoi,
+pub struct NeighborSiteIterator<'t, T: ConvexBoundary> {
+    voronoi: &'t Voronoi<T>,
     topo_neighbor_iter: TopologicalNeighborSiteIterator<'t>,
     site: usize
 }
 
-impl<'t> NeighborSiteIterator<'t> {
-    pub fn new(voronoi: &'t Voronoi, site: usize) -> Self {
+impl<'t, T: ConvexBoundary> NeighborSiteIterator<'t, T> {
+    pub fn new(voronoi: &'t Voronoi<T>, site: usize) -> Self {
         Self {
             voronoi,
             topo_neighbor_iter: TopologicalNeighborSiteIterator::new(voronoi, site),
@@ -123,7 +123,7 @@ impl<'t> NeighborSiteIterator<'t> {
     }
 }
 
-impl<'t> Iterator for NeighborSiteIterator<'t> {
+impl<'t, T: ConvexBoundary> Iterator for NeighborSiteIterator<'t, T> {
     type Item = usize;
 
     /// Get the next neighboring site.
@@ -173,7 +173,7 @@ pub struct CellPathIterator<'t, F> {
 
 impl<'t, F> CellPathIterator<'t, F> {
     /// Creates iterator based on the starting site and cost function.
-    pub fn new(voronoi: &'t Voronoi, site: usize, cost_fn: F) -> Self {
+    pub fn new<T: ConvexBoundary>(voronoi: &'t Voronoi<T>, site: usize, cost_fn: F) -> Self {
         assert!(site < voronoi.sites.len(), "site {} does not exist", site);
 
         Self::with_triangulation(voronoi.triangulation(), &voronoi.site_to_incoming_leftmost_halfedge, site, cost_fn)
@@ -226,7 +226,7 @@ impl<'t, F> Iterator for CellPathIterator<'t, F>
 /// Produces an iterator that calculates the shortest path from ```start_site``` to a ```dest``` point.
 ///
 /// If destination point is outside voronoi diagram, then the closest point to destination in the voronoi diagram will be returned.
-pub fn shortest_path_iter<'v>(voronoi: &'v Voronoi, start_site: usize, dest: Point) -> impl Iterator<Item = usize> + 'v {
+pub fn shortest_path_iter<'v, T: ConvexBoundary>(voronoi: &'v Voronoi<T>, start_site: usize, dest: Point) -> impl Iterator<Item = usize> + 'v {
     shortest_path_iter_from_triangulation(voronoi.triangulation(), &voronoi.sites(), &voronoi.site_to_incoming_leftmost_halfedge, start_site, dest)
 }
 
@@ -249,13 +249,13 @@ pub (crate) fn shortest_path_iter_from_triangulation<'t>(triangulation: &'t Tria
 #[cfg(test)]
 mod test {
     use delaunator::Point;
-    use crate::{VoronoiBuilder, utils::test::assert_list_eq};
+    use crate::{VoronoiBuilder, utils::test::assert_list_eq, BoundingBox};
     use super::*;
 
     #[test]
     fn iter_neighbors_hull_test() {
         let sites = vec![Point { x: -0.5, y: 0.0 }, Point { x: 0.5, y: 0.0 }, Point { x: 0.0, y: 0.0 }, Point { x: 0.0, y: 0.5 }, Point { x: 0.0, y: -0.5 }];
-        let v = VoronoiBuilder::default()
+        let v = VoronoiBuilder::<BoundingBox>::default()
             .set_sites(sites)
             .build()
             .unwrap();
@@ -270,7 +270,7 @@ mod test {
     #[test]
     fn iter_neighbors_inner_test() {
         let sites = vec![Point { x: -0.5, y: 0.0 }, Point { x: 0.5, y: 0.0 }, Point { x: 0.0, y: 0.0 }, Point { x: 0.0, y: 0.5 }, Point { x: 0.0, y: -0.5 }];
-        let v = VoronoiBuilder::default()
+        let v = VoronoiBuilder::<BoundingBox>::default()
             .set_sites(sites)
             .build()
             .unwrap();
@@ -305,7 +305,7 @@ mod test {
             Point { x: 0.2, y: 0.0 }, Point { x: 0.2, y: 0.5 }, Point { x: 0.2, y: -0.5 },
             Point { x: 0.5, y: 0.0 },
         ];
-        let v = VoronoiBuilder::default()
+        let v = VoronoiBuilder::<BoundingBox>::default()
             .set_sites(sites.clone())
             .build()
             .unwrap();

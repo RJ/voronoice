@@ -23,7 +23,7 @@ fn delaunay_benchmark_fn(b: &mut Bencher, size: usize) {
 fn voronoi_benchmark_fn(b: &mut Bencher, size: usize) {
     b.iter_batched(
         || create_random_sites(size),
-        |sites| VoronoiBuilder::default().set_sites(sites).build(),
+        |sites| VoronoiBuilder::<BoundingBox>::default().set_sites(sites).build(),
         BatchSize::SmallInput);
 }
 

@@ -1,22 +1,22 @@
-use super::{BoundingBox, ClipBehavior, Point, Voronoi};
+use super::{ConvexBoundary, ClipBehavior, Point, Voronoi};
 use super::utils::calculate_approximated_cetroid;
 
 /// Provides a convenient way to construct a Voronoi diagram.
 #[derive(Default)]
-pub struct VoronoiBuilder {
+pub struct VoronoiBuilder<T: ConvexBoundary> {
     sites: Option<Vec<Point>>,
     lloyd_iterations: usize,
-    bounding_box: BoundingBox,
+    boundary: T,
     clip_behavior: ClipBehavior,
 }
 
-impl VoronoiBuilder {
+impl<T: ConvexBoundary> VoronoiBuilder<T> {
 
-    /// Sets the [BoundingBox] that will be used to enclose the graph.
+    /// Sets the [ConvexBoundary] that will be used to enclose the graph.
     ///
-    /// Default value is [BoundingBox::default()].
-    pub fn set_bounding_box(mut self, bounding_box: BoundingBox) -> Self {
-        self.bounding_box = bounding_box;
+    /// Default value is [ConvexBoundary::default()].
+    pub fn set_boundary(mut self, boundary: T) -> Self {
+        self.boundary = boundary;
         self
     }
 
@@ -53,9 +53,9 @@ impl VoronoiBuilder {
     /// use voronoice::*;
     /// // creates a voronoi graph from generated square sites, within a square bounding box of side 5.0
     /// // and runs 4 lloyd relaxation iterations to spread sites in the region
-    /// let v: Voronoi = VoronoiBuilder::default()
+    /// let v: Voronoi<_> = VoronoiBuilder::default()
     ///     .generate_square_sites(10)
-    ///     .set_bounding_box(BoundingBox::new_centered_square(5.0))
+    ///     .set_boundary(BoundingBox::new_centered_square(5.0))
     ///     .set_lloyd_relaxation_iterations(4)
     ///     .build()
     ///     .unwrap();
@@ -64,17 +64,17 @@ impl VoronoiBuilder {
     /// # Panics
     ///
     /// Panics if no sites have been provided through [Self::set_sites] or one of the generate_*_sites methods.
-    pub fn build(mut self) -> Option<Voronoi> {
+    pub fn build(mut self) -> Option<Voronoi<T>> {
         let v = Voronoi::new(
             self.sites.take().expect("Cannot build voronoi without sites. Call set_sites() first."),
-            self.bounding_box.clone(),
+            self.boundary.clone(),
             self.clip_behavior,
         );
 
         self.perform_lloyd_relaxation(v)
     }
 
-    fn perform_lloyd_relaxation(&mut self, mut v: Option<Voronoi>) -> Option<Voronoi> {
+    fn perform_lloyd_relaxation(&mut self, mut v: Option<Voronoi<T>>) -> Option<Voronoi<T>> {
         for _ in 0..self.lloyd_iterations {
             if let Some(voronoi) = v {
                 // get vertices for each cell and approximate centroid
@@ -135,9 +135,9 @@ impl VoronoiBuilder {
         self.generate_rect_sites(width, width)
     }
 
-    fn create_builder_from_voronoi_without_sites(v: &Voronoi) -> Self {
+    fn create_builder_from_voronoi_without_sites(v: &Voronoi<T>) -> Self {
         Self {
-            bounding_box: v.bounding_box.clone(),
+            boundary: v.boundary.clone(),
             clip_behavior: v.clip_behavior,
             lloyd_iterations: 0,
             sites: None,
@@ -145,10 +145,10 @@ impl VoronoiBuilder {
     }
 }
 
-impl From<&Voronoi> for VoronoiBuilder {
+impl<T: ConvexBoundary> From<&Voronoi<T>> for VoronoiBuilder<T> {
     /// Creates a builder with same configurations that produced the original voronoi.
     /// Useful for performing Lloyd relaxation or storing the configuration to generate a identical diagram.
-    fn from(v: &Voronoi) -> Self {
+    fn from(v: &Voronoi<T>) -> Self {
         let mut builder = Self::create_builder_from_voronoi_without_sites(v);
         builder.sites = Some(v.sites.clone());
 
@@ -156,10 +156,10 @@ impl From<&Voronoi> for VoronoiBuilder {
     }
 }
 
-impl From<Voronoi> for VoronoiBuilder {
+impl<T: ConvexBoundary> From<Voronoi<T>> for VoronoiBuilder<T> {
     /// Creates a builder with same configurations that produced the original voronoi, consuming it.
     /// Useful for performing Lloyd relaxation or storing the configuration to generate a identical diagram.
-    fn from(v: Voronoi) -> Self {
+    fn from(v: Voronoi<T>) -> Self {
         let mut builder = Self::create_builder_from_voronoi_without_sites(&v);
         builder.sites = Some(v.sites);
 
