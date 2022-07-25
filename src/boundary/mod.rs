@@ -1,10 +1,12 @@
 mod bounding_box;
+mod convex_polygon;
 
 use std::{fmt::Display, str::FromStr};
 
 use super::Point;
 
 pub use bounding_box::BoundingBox;
+pub use convex_polygon::ConvexPolygon;
 
 /// Defines how Voronoi generation will handle clipping of Voronoi cell edges within the convex boundary.
 ///

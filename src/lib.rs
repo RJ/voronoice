@@ -58,7 +58,7 @@ use self::{
 };
 
 pub use voronoi_builder::VoronoiBuilder;
-pub use boundary::{BoundingBox, ClipBehavior, ConvexBoundary};
+pub use boundary::{BoundingBox, ClipBehavior, ConvexBoundary, ConvexPolygon};
 pub use voronoi_cell::VoronoiCell;
 pub use iterator::TopologicalNeighborSiteIterator;
 pub use iterator::NeighborSiteIterator;
