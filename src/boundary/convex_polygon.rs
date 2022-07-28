@@ -1,5 +1,6 @@
 use super::{ConvexBoundary, Point};
 use crate::utils::EQ_EPSILON;
+const ISECT_EPSILON: f64 = 5e-4;
 
 #[derive(Debug, Clone)]
 pub struct ConvexPolygon {
@@ -43,21 +44,29 @@ impl ConvexBoundary for ConvexPolygon {
             .zip(self.vertices.iter().cycle().skip(1))
             .enumerate()
         {
-            let edge_aabb_top_left = Point {
-                x: f64::min(a.x, b.x),
-                y: f64::min(a.y, b.y),
-            };
-            let edge_aabb_bottom_right = Point {
-                x: f64::max(a.x, b.x),
-                y: f64::max(a.y, b.y),
-            };
-            if edge_aabb_top_left.x <= point.x
-                && point.x <= edge_aabb_bottom_right.x
-                && edge_aabb_top_left.y <= point.y
-                && point.y <= edge_aabb_bottom_right.y
-                && robust::orient2d(a.into(), b.into(), point.into()).abs() <= EQ_EPSILON
+            let edge_left = f64::min(a.x, b.x);
+            let edge_top = f64::min(a.y, b.y);
+            let edge_right = f64::max(a.x, b.x);
+            let edge_bottom = f64::max(a.y, b.y);
+
+            if edge_left <= point.x
+                && point.x <= edge_right
+                && edge_top <= point.y
+                && point.y <= edge_bottom
             {
-                return Some((i + 1) % self.vertices.len());
+                // TODO: test distance from edge?
+                let val = robust::orient2d(a.into(), b.into(), point.into());
+                #[cfg(debug_logs)]
+                {
+                    println!("Point inside edge bounding box, orient2d value: {val}, epsilon: {ISECT_EPSILON}");
+                    println!(
+                        "(|val| - epsilon)/epsilon = {}",
+                        (val.abs() - ISECT_EPSILON) / ISECT_EPSILON
+                    );
+                }
+                if val.abs() <= ISECT_EPSILON {
+                    return Some((i + 1) % self.vertices.len());
+                }
             }
         }
         None
