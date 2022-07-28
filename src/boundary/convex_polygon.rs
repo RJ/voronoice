@@ -1,6 +1,5 @@
-use crate::utils::EQ_EPSILON;
-
 use super::{ConvexBoundary, Point};
+use crate::utils::EQ_EPSILON;
 
 #[derive(Debug, Clone)]
 pub struct ConvexPolygon {
@@ -188,7 +187,11 @@ mod test {
         let origin = Point { x: 0.0, y: 0.0 };
         let outside_point = Point { x: 123.0, y: 456.0 };
         assert!(polygon.is_inside(&origin), "Origin inside default polygon");
-        assert!(!polygon.is_inside(&outside_point), "{:?} ouside default polygon", outside_point);
+        assert!(
+            !polygon.is_inside(&outside_point),
+            "{:?} ouside default polygon",
+            outside_point
+        );
     }
 
     #[test]

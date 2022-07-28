@@ -1,4 +1,4 @@
-use criterion::{BatchSize, Bencher, BenchmarkId, Criterion, criterion_group, criterion_main};
+use criterion::{criterion_group, criterion_main, BatchSize, Bencher, BenchmarkId, Criterion};
 use delaunator::triangulate;
 use voronoice::*;
 
@@ -9,7 +9,10 @@ fn create_random_sites(size: usize) -> Vec<Point> {
     let x_range = rand::distributions::Uniform::new(-1.0, 1.0);
     let y_range = rand::distributions::Uniform::new(-1.0, 1.0);
     (0..size)
-        .map(|_| Point { x: rng.sample(x_range), y: rng.sample(y_range) })
+        .map(|_| Point {
+            x: rng.sample(x_range),
+            y: rng.sample(y_range),
+        })
         .collect()
 }
 
@@ -17,31 +20,35 @@ fn delaunay_benchmark_fn(b: &mut Bencher, size: usize) {
     b.iter_batched(
         || create_random_sites(size),
         |sites| (triangulate(&sites), sites),
-        BatchSize::SmallInput);
+        BatchSize::SmallInput,
+    );
 }
 
 fn voronoi_benchmark_fn(b: &mut Bencher, size: usize) {
     b.iter_batched(
         || create_random_sites(size),
-        |sites| VoronoiBuilder::<BoundingBox>::default().set_sites(sites).build(),
-        BatchSize::SmallInput);
+        |sites| {
+            VoronoiBuilder::<BoundingBox>::default()
+                .set_sites(sites)
+                .build()
+        },
+        BatchSize::SmallInput,
+    );
 }
 
 fn criterion_benchmark(c: &mut Criterion) {
     let mut group = c.benchmark_group("Compare");
-    let iterations: [usize;7] = [7, 100, 500, 1_000, 10_000, 100_000, 500_000];
+    let iterations: [usize; 7] = [7, 100, 500, 1_000, 10_000, 100_000, 500_000];
 
     for size in iterations.iter() {
-        group.bench_with_input(
-            BenchmarkId::new("voronoi", size),
-            size,
-            |b, &bench_size| voronoi_benchmark_fn(b, bench_size)
-        );
+        group.bench_with_input(BenchmarkId::new("voronoi", size), size, |b, &bench_size| {
+            voronoi_benchmark_fn(b, bench_size)
+        });
 
         group.bench_with_input(
             BenchmarkId::new("delaunay", size),
             size,
-            |b, &bench_size| delaunay_benchmark_fn(b, bench_size)
+            |b, &bench_size| delaunay_benchmark_fn(b, bench_size),
         );
     }
 

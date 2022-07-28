@@ -1,13 +1,9 @@
 use std::fmt;
+
 use delaunator::EMPTY;
 
+use super::{iterator::NeighborSiteIterator, Point, Voronoi};
 use crate::ConvexBoundary;
-
-use super::{
-    Voronoi,
-    Point,
-    iterator::NeighborSiteIterator
-};
 
 /// Represents a Voronoi cell. This is an ergonomic way to access cell details.
 ///
@@ -15,16 +11,13 @@ use super::{
 #[derive(Clone)]
 pub struct VoronoiCell<'v, T: ConvexBoundary> {
     site: usize,
-    voronoi: &'v Voronoi<T>
+    voronoi: &'v Voronoi<T>,
 }
 
 impl<'v, T: ConvexBoundary> VoronoiCell<'v, T> {
     #[inline]
-    pub (super) fn new(site: usize, voronoi: &'v Voronoi<T>) -> Self {
-        Self {
-            site,
-            voronoi
-        }
+    pub(super) fn new(site: usize, voronoi: &'v Voronoi<T>) -> Self {
+        Self { site, voronoi }
     }
 
     /// Gets a reference to the position of the site associated with this cell.
@@ -76,8 +69,11 @@ impl<'v, T: ConvexBoundary> VoronoiCell<'v, T> {
     /// If the voronoi diagram was built with clipping disabled, the cells in the hull will not be closed, so the last edge returned by this iterator should be discarted.
     #[inline]
     pub fn iter_edges(&self) -> impl Iterator<Item = (usize, usize)> + 'v + Clone {
-        self.iter_triangles()
-            .zip(self.iter_triangles().skip(1).chain(std::iter::once(*self.triangles().first().unwrap())))
+        self.iter_triangles().zip(
+            self.iter_triangles()
+                .skip(1)
+                .chain(std::iter::once(*self.triangles().first().unwrap())),
+        )
     }
 
     /// Gets an iterator for the vertices of this cell.
@@ -86,7 +82,9 @@ impl<'v, T: ConvexBoundary> VoronoiCell<'v, T> {
     /// Please see [Self::triangles] and [Voronoi::vertices] for additional details regarding hull closing and clipping effects on vertices.
     #[inline]
     pub fn iter_vertices(&self) -> impl Iterator<Item = &Point> + Clone {
-        self.triangles().iter().map(move |&t| &self.voronoi.circumcenters[t])
+        self.triangles()
+            .iter()
+            .map(move |&t| &self.voronoi.circumcenters[t])
     }
 
     /// Gets an iterator that returns the index of each site that shared an edge with this cell/site, in a counter-clockwise manner.
@@ -112,7 +110,7 @@ impl<'v, T: ConvexBoundary> VoronoiCell<'v, T> {
 
     /// Gets an iterator that returns the shortest path on the Voronoi diagram to the destination point, starting from the current cell.
     #[inline]
-    pub fn iter_path<'p>(&self, dest: Point) ->  impl Iterator<Item = usize> + 'v {
+    pub fn iter_path<'p>(&self, dest: Point) -> impl Iterator<Item = usize> + 'v {
         crate::iterator::shortest_path_iter(self.voronoi, self.site, dest)
     }
 
@@ -130,13 +128,13 @@ impl<'v, T: ConvexBoundary> VoronoiCell<'v, T> {
 }
 
 #[allow(dead_code)]
-impl<'v, T: ConvexBoundary> fmt::Debug for  VoronoiCell<'v, T> {
+impl<'v, T: ConvexBoundary> fmt::Debug for VoronoiCell<'v, T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         #[derive(Debug)]
         struct Edge {
             edge: usize,
             incoming_site: usize,
-            outgoing_site: usize
+            outgoing_site: usize,
         }
 
         #[derive(Debug)]
@@ -144,32 +142,43 @@ impl<'v, T: ConvexBoundary> fmt::Debug for  VoronoiCell<'v, T> {
             site: usize,
             position: Point,
             is_on_hull: bool,
-            leftmost_incoming_edge: Edge
+            leftmost_incoming_edge: Edge,
         }
 
         #[derive(Debug)]
         struct Cellvertices {
             /// Each vertex is the circumcenter of a associated Delaunay triangle
             triangles: Vec<usize>,
-            positions: Vec<Point>
+            positions: Vec<Point>,
         }
         let leftmost_edge = self.voronoi.site_to_incoming_leftmost_halfedge[self.site];
 
         f.debug_struct("VoronoiCell")
-            .field("site", &Site {
-                site: self.site,
-                position: self.site_position().clone(),
-                is_on_hull: self.is_on_hull(),
-                leftmost_incoming_edge: Edge {
-                    edge: leftmost_edge,
-                    incoming_site: self.site,
-                    outgoing_site: self.voronoi.triangulation.triangles[leftmost_edge]
-                }
-            })
-            .field("vertices", &Cellvertices {
-                triangles: self.triangles().iter().copied().collect(),
-                positions: self.triangles().iter().copied().map(|t| self.voronoi.circumcenters[t].clone()).collect()
-            })
+            .field(
+                "site",
+                &Site {
+                    site: self.site,
+                    position: self.site_position().clone(),
+                    is_on_hull: self.is_on_hull(),
+                    leftmost_incoming_edge: Edge {
+                        edge: leftmost_edge,
+                        incoming_site: self.site,
+                        outgoing_site: self.voronoi.triangulation.triangles[leftmost_edge],
+                    },
+                },
+            )
+            .field(
+                "vertices",
+                &Cellvertices {
+                    triangles: self.triangles().iter().copied().collect(),
+                    positions: self
+                        .triangles()
+                        .iter()
+                        .copied()
+                        .map(|t| self.voronoi.circumcenters[t].clone())
+                        .collect(),
+                },
+            )
             .finish()
     }
 }

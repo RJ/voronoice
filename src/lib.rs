@@ -46,24 +46,19 @@
 
 mod boundary;
 mod cell_builder;
-mod voronoi_cell;
 mod iterator;
 mod utils;
 mod voronoi_builder;
+mod voronoi_cell;
 
-use delaunator::{EMPTY, Triangulation, triangulate};
-use self::{
-    utils::cicumcenter,
-    cell_builder::*
-};
-
-pub use voronoi_builder::VoronoiBuilder;
 pub use boundary::{BoundingBox, ClipBehavior, ConvexBoundary, ConvexPolygon};
-pub use voronoi_cell::VoronoiCell;
-pub use iterator::TopologicalNeighborSiteIterator;
-pub use iterator::NeighborSiteIterator;
-pub use iterator::CellPathIterator;
 pub use delaunator::Point;
+use delaunator::{triangulate, Triangulation, EMPTY};
+pub use iterator::{CellPathIterator, NeighborSiteIterator, TopologicalNeighborSiteIterator};
+pub use voronoi_builder::VoronoiBuilder;
+pub use voronoi_cell::VoronoiCell;
+
+use self::{cell_builder::*, utils::cicumcenter};
 
 /// The dual Delaunay-Voronoi graph.
 ///
@@ -89,7 +84,7 @@ pub struct Voronoi<T: ConvexBoundary> {
 
     /// A map for each voronoi cell and the associated delaunay triangles whose centroids are the cell's vertices.
     /// For any site ```i```, the associated voronoi cell associated triangles are represented by ```cell_triangles[i]```.
-    cells: Vec<Vec<usize>>
+    cells: Vec<Vec<usize>>,
 }
 
 impl<T: ConvexBoundary> std::fmt::Debug for Voronoi<T> {
@@ -110,8 +105,11 @@ impl<T: ConvexBoundary> Voronoi<T> {
     fn new(sites: Vec<Point>, boundary: T, clip_behavior: ClipBehavior) -> Option<Self> {
         // remove any points not within the boundary
         let sites = match clip_behavior {
-            ClipBehavior::RemoveSitesOutsideBoundaryOnly | ClipBehavior::Clip => sites.into_iter().filter(|p| boundary.is_inside(p)).collect::<Vec<Point>>(),
-            ClipBehavior::None => sites
+            ClipBehavior::RemoveSitesOutsideBoundaryOnly | ClipBehavior::Clip => sites
+                .into_iter()
+                .filter(|p| boundary.is_inside(p))
+                .collect::<Vec<Point>>(),
+            ClipBehavior::None => sites,
         };
 
         let triangulation = triangulate(&sites);
@@ -120,18 +118,28 @@ impl<T: ConvexBoundary> Voronoi<T> {
         // 3 * t, 3 * t + 1 and 3 * t + 2 are the vertices of a triangle in this vector
         let num_of_triangles = triangulation.triangles.len() / 3;
         if num_of_triangles == 0 {
-            return None
+            return None;
         }
 
         // calculate circuncenter of each triangle, these will be the vertices of the voronoi cells
-        let circumcenters = (0..num_of_triangles).map(|t| cicumcenter(
-            &sites[triangulation.triangles[3* t]],
-            &sites[triangulation.triangles[3* t + 1]],
-            &sites[triangulation.triangles[3* t + 2]])
-        ).collect();
+        let circumcenters = (0..num_of_triangles)
+            .map(|t| {
+                cicumcenter(
+                    &sites[triangulation.triangles[3 * t]],
+                    &sites[triangulation.triangles[3 * t + 1]],
+                    &sites[triangulation.triangles[3 * t + 2]],
+                )
+            })
+            .collect();
 
         // create cell builder to build cells and update circumcenters
-        let cell_builder = CellBuilder::new(&triangulation, &sites, circumcenters, boundary.clone(), clip_behavior);
+        let cell_builder = CellBuilder::new(
+            &triangulation,
+            &sites,
+            circumcenters,
+            boundary.clone(),
+            clip_behavior,
+        );
         let result = cell_builder.build();
 
         Some(Voronoi {
@@ -141,7 +149,7 @@ impl<T: ConvexBoundary> Voronoi<T> {
             sites,
             clip_behavior,
             circumcenters: result.vertices,
-            cells: result.cells
+            cells: result.cells,
         })
     }
 
@@ -172,8 +180,7 @@ impl<T: ConvexBoundary> Voronoi<T> {
     /// Gets an iterator to walk through all Voronoi cells.
     /// Cells are iterated in order with the vector returned by [Self::sites()].
     pub fn iter_cells<'v>(&'v self) -> impl Iterator<Item = VoronoiCell<'v, T>> + Clone {
-        (0..self.sites.len())
-            .map(move |s| self.cell(s))
+        (0..self.sites.len()).map(move |s| self.cell(s))
     }
 
     /// Gets a vector of Voronoi cell vectors that index the cell vertex positions.
@@ -234,6 +241,7 @@ impl<T: ConvexBoundary> Voronoi<T> {
 #[cfg(test)]
 mod tests {
     use rand::Rng;
+
     use super::*;
 
     fn create_random_bounding_box_builder(size: usize) -> VoronoiBuilder<BoundingBox> {
@@ -244,12 +252,13 @@ mod tests {
         let x_range = rand::distributions::Uniform::new(-bbox.width() / 2.0, bbox.width() / 2.0);
         let y_range = rand::distributions::Uniform::new(-bbox.height() / 2.0, bbox.height() / 2.0);
         let sites = (0..size)
-            .map(|_| Point { x: rng.sample(x_range), y: rng.sample(y_range) })
+            .map(|_| Point {
+                x: rng.sample(x_range),
+                y: rng.sample(y_range),
+            })
             .collect();
 
-        builder
-            .set_boundary(bbox)
-            .set_sites(sites)
+        builder.set_boundary(bbox).set_sites(sites)
     }
 
     #[test]
@@ -299,9 +308,19 @@ mod tests {
     #[test]
     fn collinear_sites() {
         let voronoi = VoronoiBuilder::<BoundingBox>::default()
-            .set_sites([ Point { x: 0.0, y: 0.0 }, Point { x: 0.0, y: 1.0 }, Point { x: 0.0, y: 2.0 } ].to_vec())
+            .set_sites(
+                [
+                    Point { x: 0.0, y: 0.0 },
+                    Point { x: 0.0, y: 1.0 },
+                    Point { x: 0.0, y: 2.0 },
+                ]
+                .to_vec(),
+            )
             .build();
 
-        assert!(voronoi.is_none(), "Collinear points do not generate valid voronoi");
+        assert!(
+            voronoi.is_none(),
+            "Collinear points do not generate valid voronoi"
+        );
     }
 }

@@ -1,24 +1,37 @@
 extern crate image;
-use rand::Rng;
-
 use std::{env, u8};
-use voronoice::{Voronoi, VoronoiBuilder, BoundingBox, Point};
+
+use rand::Rng;
+use voronoice::{BoundingBox, Point, Voronoi, VoronoiBuilder};
 
 fn main() {
-    let path = env::args().nth(1).expect("path to image file expected as first parameter");
-    let factor = env::args().nth(2).expect("expected secong argument to be an integer factor").parse::<f64>().expect("expected secong argument to be an integer factor") / 10000.0;
+    let path = env::args()
+        .nth(1)
+        .expect("path to image file expected as first parameter");
+    let factor = env::args()
+        .nth(2)
+        .expect("expected secong argument to be an integer factor")
+        .parse::<f64>()
+        .expect("expected secong argument to be an integer factor")
+        / 10000.0;
     let mut img = image::open(path).unwrap().into_rgb8();
     let width = img.width() as usize;
     let height = img.height() as usize;
 
     // generate sites
-    let size  = ((width * height) as f64 * factor) as usize;
-    println!("Generating {} sites (factor {}, image dimensions: {} x {}", size, factor, width, height);
+    let size = ((width * height) as f64 * factor) as usize;
+    println!(
+        "Generating {} sites (factor {}, image dimensions: {} x {}",
+        size, factor, width, height
+    );
     let mut rng = rand::thread_rng();
     let x_range = rand::distributions::Uniform::new(0, width);
     let y_range = rand::distributions::Uniform::new(0, height);
     let sites = (0..size)
-        .map(move |_| Point { x: rng.sample(x_range) as f64, y: rng.sample(y_range) as f64 })
+        .map(move |_| Point {
+            x: rng.sample(x_range) as f64,
+            y: rng.sample(y_range) as f64,
+        })
         .collect();
 
     println!("Generating voronoi diagram");
@@ -26,7 +39,14 @@ fn main() {
         .set_sites(sites)
         .set_clip_behavior(voronoice::ClipBehavior::None)
         // image origin is top left corner, center is width/2,height/2
-        .set_boundary(BoundingBox::new(Point { x: width as f64 / 2.0, y: height as f64 / 2.0 }, width as f64, height as f64))
+        .set_boundary(BoundingBox::new(
+            Point {
+                x: width as f64 / 2.0,
+                y: height as f64 / 2.0,
+            },
+            width as f64,
+            height as f64,
+        ))
         .build()
         .unwrap();
 
@@ -36,8 +56,8 @@ fn main() {
 
     println!("Accumulating cell colors");
     let mut last_size = 0;
-    for x in 0..width-1 {
-        for y in 0..height-1 {
+    for x in 0..width - 1 {
+        for y in 0..height - 1 {
             let pindex = width * y + x;
             let x = x as u32;
             let y = y as u32;
@@ -70,8 +90,8 @@ fn main() {
 
     println!("Generating image");
     // assign averaged color to pixels in cells
-    for x in 0..width-1 {
-        for y in 0..height-1 {
+    for x in 0..width - 1 {
+        for y in 0..height - 1 {
             let pindex = width * y + x;
             let x = x as u32;
             let y = y as u32;
@@ -89,7 +109,10 @@ fn main() {
 }
 
 fn get_cell(voronoi: &Voronoi<BoundingBox>, current_site: usize, x: u32, y: u32) -> usize {
-    let p = Point { x: x as f64, y: y as f64 };
+    let p = Point {
+        x: x as f64,
+        y: y as f64,
+    };
     voronoi
         .cell(current_site)
         .iter_path(p)

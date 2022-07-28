@@ -1,7 +1,10 @@
-use delaunator::{Point, Triangulation, next_halfedge};
-use crate::{Voronoi, utils::{dist2, site_of_incoming, self}, ConvexBoundary};
+use delaunator::{next_halfedge, Point, Triangulation};
 
-use super::{EMPTY};
+use super::EMPTY;
+use crate::{
+    utils::{self, dist2, site_of_incoming},
+    ConvexBoundary, Voronoi,
+};
 
 /// Iterator that walks through all the edges connected to a provided starting point.
 /// The iteration happens in a clock-wise manner.
@@ -11,7 +14,7 @@ use super::{EMPTY};
 pub struct EdgesAroundSiteIterator<'t> {
     triangulation: &'t Triangulation,
     start: usize,
-    next: usize
+    next: usize,
 }
 
 impl<'t> EdgesAroundSiteIterator<'t> {
@@ -21,7 +24,7 @@ impl<'t> EdgesAroundSiteIterator<'t> {
         Self {
             triangulation,
             start: incoming_edge,
-            next: incoming_edge
+            next: incoming_edge,
         }
     }
 }
@@ -64,12 +67,22 @@ pub struct TopologicalNeighborSiteIterator<'t> {
 impl<'t> TopologicalNeighborSiteIterator<'t> {
     /// Creates iterator based on the site.
     pub fn new<T: ConvexBoundary>(voronoi: &'t Voronoi<T>, site: usize) -> Self {
-        Self::with_triangulation(voronoi.triangulation(), &voronoi.site_to_incoming_leftmost_halfedge, site)
+        Self::with_triangulation(
+            voronoi.triangulation(),
+            &voronoi.site_to_incoming_leftmost_halfedge,
+            site,
+        )
     }
 
     /// Creates iterator based on the site.
-    pub fn with_triangulation(triangulation: &'t Triangulation, site_to_incoming_leftmost_halfedge: &'t Vec<usize>, site: usize) -> Self {
-        let &incoming_leftmost_edge = site_to_incoming_leftmost_halfedge.get(site).expect("Site does not exist");
+    pub fn with_triangulation(
+        triangulation: &'t Triangulation,
+        site_to_incoming_leftmost_halfedge: &'t Vec<usize>,
+        site: usize,
+    ) -> Self {
+        let &incoming_leftmost_edge = site_to_incoming_leftmost_halfedge
+            .get(site)
+            .expect("Site does not exist");
         Self {
             iter: EdgesAroundSiteIterator::new(&triangulation, incoming_leftmost_edge),
             last_incoming: EMPTY,
@@ -110,7 +123,7 @@ impl<'t> Iterator for TopologicalNeighborSiteIterator<'t> {
 pub struct NeighborSiteIterator<'t, T: ConvexBoundary> {
     voronoi: &'t Voronoi<T>,
     topo_neighbor_iter: TopologicalNeighborSiteIterator<'t>,
-    site: usize
+    site: usize,
 }
 
 impl<'t, T: ConvexBoundary> NeighborSiteIterator<'t, T> {
@@ -118,7 +131,7 @@ impl<'t, T: ConvexBoundary> NeighborSiteIterator<'t, T> {
         Self {
             voronoi,
             topo_neighbor_iter: TopologicalNeighborSiteIterator::new(voronoi, site),
-            site
+            site,
         }
     }
 }
@@ -133,7 +146,9 @@ impl<'t, T: ConvexBoundary> Iterator for NeighborSiteIterator<'t, T> {
         if let Some(neighbor) = self.topo_neighbor_iter.next() {
             // if first neighbor and on hull, need special check for clipping
             if prev_last_incoming == EMPTY
-                && self.voronoi.triangulation.halfedges[self.topo_neighbor_iter.last_incoming] == EMPTY {
+                && self.voronoi.triangulation.halfedges[self.topo_neighbor_iter.last_incoming]
+                    == EMPTY
+            {
                 if utils::has_common_voronoi_edge(self.voronoi, self.site, neighbor) {
                     Some(neighbor)
                 } else {
@@ -168,7 +183,7 @@ pub struct CellPathIterator<'t, F> {
     site: usize,
     cost_fn: F,
     triangulation: &'t Triangulation,
-    site_to_incoming_leftmost_halfedge: &'t Vec<usize>
+    site_to_incoming_leftmost_halfedge: &'t Vec<usize>,
 }
 
 impl<'t, F> CellPathIterator<'t, F> {
@@ -176,21 +191,33 @@ impl<'t, F> CellPathIterator<'t, F> {
     pub fn new<T: ConvexBoundary>(voronoi: &'t Voronoi<T>, site: usize, cost_fn: F) -> Self {
         assert!(site < voronoi.sites.len(), "site {} does not exist", site);
 
-        Self::with_triangulation(voronoi.triangulation(), &voronoi.site_to_incoming_leftmost_halfedge, site, cost_fn)
+        Self::with_triangulation(
+            voronoi.triangulation(),
+            &voronoi.site_to_incoming_leftmost_halfedge,
+            site,
+            cost_fn,
+        )
     }
 
-    pub fn with_triangulation(triangulation: &'t Triangulation, site_to_incoming_leftmost_halfedge: &'t Vec<usize>, site: usize, cost_fn: F) -> Self {
+    pub fn with_triangulation(
+        triangulation: &'t Triangulation,
+        site_to_incoming_leftmost_halfedge: &'t Vec<usize>,
+        site: usize,
+        cost_fn: F,
+    ) -> Self {
         Self {
             site,
             cost_fn,
             triangulation,
-            site_to_incoming_leftmost_halfedge
+            site_to_incoming_leftmost_halfedge,
         }
     }
 }
 
 impl<'t, F> Iterator for CellPathIterator<'t, F>
-    where F : Fn(usize, usize) -> f64 {
+where
+    F: Fn(usize, usize) -> f64,
+{
     type Item = usize;
 
     /// Walks current site neighbor and find the next site in the path
@@ -199,9 +226,13 @@ impl<'t, F> Iterator for CellPathIterator<'t, F>
 
         if current_site != EMPTY {
             // take the neighbor with least cost
-            let next = TopologicalNeighborSiteIterator::with_triangulation(self.triangulation, self.site_to_incoming_leftmost_halfedge, current_site)
-                .map(|n| (n, (self.cost_fn)(current_site, n)))
-                .min_by(|(_, cost0), (_, cost1)| cost0.partial_cmp(cost1).unwrap());
+            let next = TopologicalNeighborSiteIterator::with_triangulation(
+                self.triangulation,
+                self.site_to_incoming_leftmost_halfedge,
+                current_site,
+            )
+            .map(|n| (n, (self.cost_fn)(current_site, n)))
+            .min_by(|(_, cost0), (_, cost1)| cost0.partial_cmp(cost1).unwrap());
 
             // if next neighbor cost is less than f64::MAX, then we can move to it - it is next in the path
             if let Some((n, cost)) = next {
@@ -226,35 +257,63 @@ impl<'t, F> Iterator for CellPathIterator<'t, F>
 /// Produces an iterator that calculates the shortest path from ```start_site``` to a ```dest``` point.
 ///
 /// If destination point is outside voronoi diagram, then the closest point to destination in the voronoi diagram will be returned.
-pub fn shortest_path_iter<'v, T: ConvexBoundary>(voronoi: &'v Voronoi<T>, start_site: usize, dest: Point) -> impl Iterator<Item = usize> + 'v {
-    shortest_path_iter_from_triangulation(voronoi.triangulation(), &voronoi.sites(), &voronoi.site_to_incoming_leftmost_halfedge, start_site, dest)
+pub fn shortest_path_iter<'v, T: ConvexBoundary>(
+    voronoi: &'v Voronoi<T>,
+    start_site: usize,
+    dest: Point,
+) -> impl Iterator<Item = usize> + 'v {
+    shortest_path_iter_from_triangulation(
+        voronoi.triangulation(),
+        &voronoi.sites(),
+        &voronoi.site_to_incoming_leftmost_halfedge,
+        start_site,
+        dest,
+    )
 }
 
-pub (crate) fn shortest_path_iter_from_triangulation<'t>(triangulation: &'t Triangulation, sites: &'t Vec<Point>, site_to_incoming_leftmost_halfedge: &'t Vec<usize>, start_site: usize, dest: Point) -> impl Iterator<Item = usize> + 't {
-    CellPathIterator::with_triangulation(triangulation, site_to_incoming_leftmost_halfedge, start_site, move |curr, next| {
-        // calculate distance
-        let dist_to_dest = dist2(&sites[curr], &dest);
-        let dist_from_next = dist2(&sites[next], &dest);
+pub(crate) fn shortest_path_iter_from_triangulation<'t>(
+    triangulation: &'t Triangulation,
+    sites: &'t Vec<Point>,
+    site_to_incoming_leftmost_halfedge: &'t Vec<usize>,
+    start_site: usize,
+    dest: Point,
+) -> impl Iterator<Item = usize> + 't {
+    CellPathIterator::with_triangulation(
+        triangulation,
+        site_to_incoming_leftmost_halfedge,
+        start_site,
+        move |curr, next| {
+            // calculate distance
+            let dist_to_dest = dist2(&sites[curr], &dest);
+            let dist_from_next = dist2(&sites[next], &dest);
 
-        if dist_to_dest <= dist_from_next {
-            // if current is closer to dest than next is, make cost to travel to next impossibly high
-            f64::MAX
-        } else {
-            // cost is distance
-            dist_from_next
-        }
-    })
+            if dist_to_dest <= dist_from_next {
+                // if current is closer to dest than next is, make cost to travel to next impossibly high
+                f64::MAX
+            } else {
+                // cost is distance
+                dist_from_next
+            }
+        },
+    )
 }
 
 #[cfg(test)]
 mod test {
     use delaunator::Point;
-    use crate::{VoronoiBuilder, utils::test::assert_list_eq, BoundingBox};
+
     use super::*;
+    use crate::{utils::test::assert_list_eq, BoundingBox, VoronoiBuilder};
 
     #[test]
     fn iter_neighbors_hull_test() {
-        let sites = vec![Point { x: -0.5, y: 0.0 }, Point { x: 0.5, y: 0.0 }, Point { x: 0.0, y: 0.0 }, Point { x: 0.0, y: 0.5 }, Point { x: 0.0, y: -0.5 }];
+        let sites = vec![
+            Point { x: -0.5, y: 0.0 },
+            Point { x: 0.5, y: 0.0 },
+            Point { x: 0.0, y: 0.0 },
+            Point { x: 0.0, y: 0.5 },
+            Point { x: 0.0, y: -0.5 },
+        ];
         let v = VoronoiBuilder::<BoundingBox>::default()
             .set_sites(sites)
             .build()
@@ -269,7 +328,13 @@ mod test {
 
     #[test]
     fn iter_neighbors_inner_test() {
-        let sites = vec![Point { x: -0.5, y: 0.0 }, Point { x: 0.5, y: 0.0 }, Point { x: 0.0, y: 0.0 }, Point { x: 0.0, y: 0.5 }, Point { x: 0.0, y: -0.5 }];
+        let sites = vec![
+            Point { x: -0.5, y: 0.0 },
+            Point { x: 0.5, y: 0.0 },
+            Point { x: 0.0, y: 0.0 },
+            Point { x: 0.0, y: 0.5 },
+            Point { x: 0.0, y: -0.5 },
+        ];
         let v = VoronoiBuilder::<BoundingBox>::default()
             .set_sites(sites)
             .build()
@@ -301,8 +366,12 @@ mod test {
     fn iter_cell_path_test() {
         let sites = vec![
             Point { x: -0.5, y: 0.0 },
-            Point { x: 0.0, y: 0.0 }, Point { x: 0.0, y: 0.5 }, Point { x: 0.0, y: -0.5 },
-            Point { x: 0.2, y: 0.0 }, Point { x: 0.2, y: 0.5 }, Point { x: 0.2, y: -0.5 },
+            Point { x: 0.0, y: 0.0 },
+            Point { x: 0.0, y: 0.5 },
+            Point { x: 0.0, y: -0.5 },
+            Point { x: 0.2, y: 0.0 },
+            Point { x: 0.2, y: 0.5 },
+            Point { x: 0.2, y: -0.5 },
             Point { x: 0.5, y: 0.0 },
         ];
         let v = VoronoiBuilder::<BoundingBox>::default()

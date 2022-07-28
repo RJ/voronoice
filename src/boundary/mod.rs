@@ -3,10 +3,10 @@ mod convex_polygon;
 
 use std::{fmt::Display, str::FromStr};
 
-use super::Point;
-
 pub use bounding_box::BoundingBox;
 pub use convex_polygon::ConvexPolygon;
+
+use super::Point;
 
 /// Defines how Voronoi generation will handle clipping of Voronoi cell edges within the convex boundary.
 ///
@@ -43,7 +43,7 @@ impl FromStr for ClipBehavior {
             "None" => Ok(Self::None),
             "RemoveSitesOutsideBoundaryOnly" => Ok(Self::RemoveSitesOutsideBoundaryOnly),
             "Clip" => Ok(Self::Clip),
-            _ => Err("Invalid option".to_string())
+            _ => Err("Invalid option".to_string()),
         }
     }
 }
@@ -78,7 +78,10 @@ pub trait ConvexBoundary: std::fmt::Debug + Default + Clone {
 
     /// Intersects a ray with the bounding box. The first intersection is returned first.
     fn project_ray(&self, point: &Point, direction: &Point) -> (Option<Point>, Option<Point>) {
-        let b = Point { x: point.x + direction.x, y: point.y + direction.y };
+        let b = Point {
+            x: point.x + direction.x,
+            y: point.y + direction.y,
+        };
         let (a, b) = self.intersect_line(point, &b);
         order_points_on_ray(point, direction, a, b)
     }
@@ -86,12 +89,19 @@ pub trait ConvexBoundary: std::fmt::Debug + Default + Clone {
 
 /// Given a ray defined by `point` and `direction`, and two points `a` and `b` on such ray, returns a tuple (w, z) where point <= w <= z.
 /// If either `a` or `b` are smaller than `point`, None is returned.
-pub (crate) fn order_points_on_ray(point: &Point, direction: &Point, a: Option<Point>, b: Option<Point>) -> (Option<Point>, Option<Point>) {
-    match (a,b) {
-        (None, None) => { // no points, no intersection
+pub(crate) fn order_points_on_ray(
+    point: &Point,
+    direction: &Point,
+    a: Option<Point>,
+    b: Option<Point>,
+) -> (Option<Point>, Option<Point>) {
+    match (a, b) {
+        (None, None) => {
+            // no points, no intersection
             (None, None)
         }
-        (Some(va), Some(vb)) => { // both a and b are reachable
+        (Some(va), Some(vb)) => {
+            // both a and b are reachable
             // point a and b are just a scalar times direction, so we can compare any non-zero
             // direction component, use largest
             let (d, da, db) = if direction.x.abs() > direction.y.abs() {
@@ -110,18 +120,21 @@ pub (crate) fn order_points_on_ray(point: &Point, direction: &Point, a: Option<P
                         // a is closer
                         (Some(va), Some(vb))
                     }
-                },
-                (true, false) => { // only a reachable
+                }
+                (true, false) => {
+                    // only a reachable
                     (Some(va), None)
-                },
-                (false, true) => { // only b reachably
+                }
+                (false, true) => {
+                    // only b reachably
                     (Some(vb), None)
-                },
-                (false, false) => { // neither a nor b is reachable, no intersection
+                }
+                (false, false) => {
+                    // neither a nor b is reachable, no intersection
                     (None, None)
                 }
             }
-        },
+        }
         (Some(va), None) => {
             if direction.x.signum() == va.x.signum() && direction.y.signum() == va.y.signum() {
                 // a is in the right direction
@@ -130,7 +143,7 @@ pub (crate) fn order_points_on_ray(point: &Point, direction: &Point, a: Option<P
                 // a can't be reached
                 (None, None)
             }
-        },
+        }
         (None, Some(vb)) => {
             if direction.x.signum() == vb.x.signum() && direction.y.signum() == vb.y.signum() {
                 // b is in the right direction

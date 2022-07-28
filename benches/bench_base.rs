@@ -10,17 +10,19 @@ pub fn create_random_builder(size: usize) -> VoronoiBuilder<BoundingBox> {
     let x_range = rand::distributions::Uniform::new(-bbox.width(), bbox.width());
     let y_range = rand::distributions::Uniform::new(-bbox.height(), bbox.height());
     let sites = (0..size)
-        .map(|_| Point { x: rng.sample(x_range), y: rng.sample(y_range) })
+        .map(|_| Point {
+            x: rng.sample(x_range),
+            y: rng.sample(y_range),
+        })
         .collect();
 
-    builder
-        .set_boundary(bbox)
-        .set_sites(sites)
+    builder.set_boundary(bbox).set_sites(sites)
 }
 
 pub fn create_benchmark_fn(b: &mut Bencher, size: usize) {
     b.iter_batched(
         || create_random_builder(size),
         |b| b.build(),
-        BatchSize::SmallInput);
+        BatchSize::SmallInput,
+    );
 }
