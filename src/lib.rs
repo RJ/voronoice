@@ -51,6 +51,7 @@ mod utils;
 mod voronoi_builder;
 mod voronoi_cell;
 
+pub use delaunator;
 pub use boundary::{BoundingBox, ClipBehavior, ConvexBoundary, ConvexPolygon};
 pub use delaunator::Point;
 use delaunator::{triangulate, Triangulation, EMPTY};
