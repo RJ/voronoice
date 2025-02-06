@@ -1,13 +1,13 @@
 use super::{ConvexBoundary, Point};
-use crate::utils::EQ_EPSILON;
+use crate::{utils::EQ_EPSILON, VoronoiceError};
 const ISECT_EPSILON: f64 = 5e-4;
 
 #[derive(Debug, Clone)]
-pub struct ConvexPolygon {
+pub struct VoroConvexPolygon {
     vertices: Vec<Point>,
 }
 
-impl Default for ConvexPolygon {
+impl Default for VoroConvexPolygon {
     fn default() -> Self {
         Self::new(vec![
             Point { x: -1.0, y: -1.0 },
@@ -15,10 +15,11 @@ impl Default for ConvexPolygon {
             Point { x: 1.0, y: 1.0 },
             Point { x: 1.0, y: -1.0 },
         ])
+        .unwrap()
     }
 }
 
-impl ConvexBoundary for ConvexPolygon {
+impl ConvexBoundary for VoroConvexPolygon {
     fn vertices(&self) -> &[Point] {
         &self.vertices
     }
@@ -37,39 +38,76 @@ impl ConvexBoundary for ConvexPolygon {
         true
     }
 
-    fn which_edge(&self, point: &Point) -> Option<usize> {
+    fn which_edge(&self, point: &Point) -> Result<usize, VoronoiceError> {
+        // Iterate over each pair of consecutive vertices (edges) in the polygon
         for (i, (a, b)) in self
             .vertices
             .iter()
             .zip(self.vertices.iter().cycle().skip(1))
             .enumerate()
         {
-            let edge_left = f64::min(a.x, b.x);
-            let edge_top = f64::min(a.y, b.y);
-            let edge_right = f64::max(a.x, b.x);
-            let edge_bottom = f64::max(a.y, b.y);
-
+            // Calculate the bounding box of the current edge
+            // add a small slop to the bounding box to account for floating point precision
+            // which causes failures when converting from f32 in my game..
+            // this is only broadphase bbox check anyway, worst case we do a little extra work..
+            let slop = 0.0001;
+            let edge_left = f64::min(a.x, b.x) - slop;
+            let edge_top = f64::min(a.y, b.y) - slop;
+            let edge_right = f64::max(a.x, b.x) + slop;
+            let edge_bottom = f64::max(a.y, b.y) + slop;
+            #[cfg(feature = "debug_logs")]
+            {
+                println!("Testing {point:?} against edge: ({i}, ({a:?}, {b:?}))")
+            }
+            // Check if the point lies within the bounding box of the edge
             if edge_left <= point.x
                 && point.x <= edge_right
                 && edge_top <= point.y
                 && point.y <= edge_bottom
             {
-                // TODO: test distance from edge?
-                let val = robust::orient2d(a.into(), b.into(), point.into());
-                #[cfg(debug_logs)]
+                #[cfg(feature = "debug_logs")]
                 {
-                    println!("Point inside edge bounding box, orient2d value: {val}, epsilon: {ISECT_EPSILON}");
+                    println!("🟩 Inside bounding box for edge {a:?} -> {b:?}");
+                }
+                // Calculate the orientation of the point with respect to the edge
+                let val = robust::orient2d(a.into(), b.into(), point.into());
+                // Debug logs to print the orientation value and epsilon comparison
+                let is_good = val.abs() <= ISECT_EPSILON;
+                #[cfg(feature = "debug_logs")]
+                {
+                    println!("Point inside edge bounding box, orient2d value: {val}, epsilon: {ISECT_EPSILON} {}",
+                                if is_good { "✅" } else { "❌" });
                     println!(
                         "(|val| - epsilon)/epsilon = {}",
-                        (val.abs() - ISECT_EPSILON) / ISECT_EPSILON
+                        (val.abs() - ISECT_EPSILON) / ISECT_EPSILON,
                     );
                 }
-                if val.abs() <= ISECT_EPSILON {
-                    return Some((i + 1) % self.vertices.len());
+                // If the orientation value is within the epsilon threshold,
+                // the point lies on the edge, so return the edge index
+                if is_good {
+                    return Ok((i + 1) % self.vertices.len());
+                }
+            } else {
+                #[cfg(feature = "debug_logs")]
+                {
+                    println!("🟥 NOT Inside bounding box for edge {a:?} -> {b:?}");
+                    let point_x = point.x;
+                    let point_y = point.y;
+                    println!(
+                        "if edge_left({edge_left}) <= point.x({point_x})
+ && point.x({point_x}) <= edge_right({edge_right})
+ && edge_top({edge_top}) <= point.y({point_y})
+ && point.y({point_y}) <= edge_bottom({edge_bottom})"
+                    );
                 }
             }
         }
-        None
+
+        // If the point doesn't lie on any edge, return an error
+        // eprintln!("💀 {self:?}\npoint={point:?}");
+        Err(VoronoiceError::Unspecified(
+            "Point not on any edge (convex polygon)".to_string(),
+        ))
     }
 
     fn intersect_line(&self, a: &Point, b: &Point) -> (Option<Point>, Option<Point>) {
@@ -119,7 +157,7 @@ impl ConvexBoundary for ConvexPolygon {
     }
 }
 
-impl ConvexPolygon {
+impl VoroConvexPolygon {
     fn is_convex_ccw(vertices: &[Point]) -> bool {
         for ((a, b), c) in vertices
             .iter()
@@ -133,16 +171,14 @@ impl ConvexPolygon {
         true
     }
 
-    pub fn new(vertices: Vec<Point>) -> Self {
-        assert!(
-            Self::is_convex_ccw(&vertices),
-            "Polygon with vertices {:?} is not both convex and oriented counter-clockwise.",
-            vertices
-        );
-        ConvexPolygon { vertices }
+    pub fn new(vertices: Vec<Point>) -> Result<Self, VoronoiceError> {
+        if !Self::is_convex_ccw(&vertices) {
+            return Err(VoronoiceError::PolygonNotConvexAndCCW);
+        }
+        Ok(VoroConvexPolygon { vertices })
     }
 
-    pub fn regular(n: i32, radius: f64) -> Self {
+    pub fn regular(n: i32, radius: f64) -> Result<Self, VoronoiceError> {
         let phase = std::f64::consts::FRAC_PI_2
             + if n % 2 == 0 {
                 std::f64::consts::PI / n as f64
@@ -179,7 +215,7 @@ mod test {
     #[test]
     #[should_panic]
     fn test_clockwise_construction_panics() {
-        ConvexPolygon::new(dented_box().into_iter().rev().collect());
+        VoroConvexPolygon::new(dented_box().into_iter().rev().collect());
     }
 
     #[test]
@@ -187,12 +223,12 @@ mod test {
     fn test_concave_construction_panics() {
         let mut concave = dented_box();
         concave.insert(3, Point { x: 0.0, y: 0.0 });
-        ConvexPolygon::new(concave);
+        VoroConvexPolygon::new(concave);
     }
 
     #[test]
     fn test_is_inside() {
-        let polygon = ConvexPolygon::new(dented_box());
+        let polygon = VoroConvexPolygon::new(dented_box()).unwrap();
         let origin = Point { x: 0.0, y: 0.0 };
         let outside_point = Point { x: 123.0, y: 456.0 };
         assert!(polygon.is_inside(&origin), "Origin inside default polygon");
@@ -205,20 +241,20 @@ mod test {
 
     #[test]
     fn test_which_edge() {
-        let polygon = ConvexPolygon::new(dented_box());
-        assert_eq!(polygon.which_edge(&Point { x: 0.5, y: 0.5 }), Some(0));
-        assert_eq!(polygon.which_edge(&Point { x: 1.0, y: -0.5 }), Some(1));
-        assert_eq!(polygon.which_edge(&Point { x: 0.0, y: -1.0 }), Some(2));
-        assert_eq!(polygon.which_edge(&Point { x: -1.0, y: 0.0 }), Some(3));
-        assert_eq!(polygon.which_edge(&Point { x: -0.5, y: 1.0 }), Some(4));
+        let polygon = VoroConvexPolygon::new(dented_box()).unwrap();
+        assert_eq!(polygon.which_edge(&Point { x: 0.5, y: 0.5 }), Ok(0));
+        assert_eq!(polygon.which_edge(&Point { x: 1.0, y: -0.5 }), Ok(1));
+        assert_eq!(polygon.which_edge(&Point { x: 0.0, y: -1.0 }), Ok(2));
+        assert_eq!(polygon.which_edge(&Point { x: -1.0, y: 0.0 }), Ok(3));
+        assert_eq!(polygon.which_edge(&Point { x: -0.5, y: 1.0 }), Ok(4));
 
-        assert_eq!(polygon.which_edge(&Point { x: 0.0, y: 0.0 }), None);
-        assert_eq!(polygon.which_edge(&Point { x: 1.0, y: 1.0 }), None);
+        assert!(polygon.which_edge(&Point { x: 0.0, y: 0.0 }).is_err());
+        assert!(polygon.which_edge(&Point { x: 1.0, y: 1.0 }).is_err());
     }
 
     #[test]
     fn test_intersect_line() {
-        let polygon = ConvexPolygon::new(dented_box());
+        let polygon = VoroConvexPolygon::new(dented_box()).unwrap();
         assert_eq!(
             polygon.intersect_line(&Point { x: -0.5, y: 0.0 }, &Point { x: 0.5, y: 0.0 }),
             (

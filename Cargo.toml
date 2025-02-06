@@ -10,9 +10,15 @@ keywords = ["voronoi", "delaunay", "graphics", "diagram"]
 categories = ["graphics", "visualization"]
 readme = "README.md"
 
+[features]
+default = []
+debug_logs = []
+
+
 [dependencies]
 delaunator = { version = "^1" }
 robust = "0.2.3"
+thiserror = "2.0.11"
 
 [dev-dependencies]
 criterion = "0.3.5"

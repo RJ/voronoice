@@ -51,15 +51,24 @@ mod utils;
 mod voronoi_builder;
 mod voronoi_cell;
 
-pub use delaunator;
-pub use boundary::{BoundingBox, ClipBehavior, ConvexBoundary, ConvexPolygon};
-pub use delaunator::Point;
+pub use boundary::{BoundingBox, ClipBehavior, ConvexBoundary, VoroConvexPolygon};
+pub use delaunator::{self, Point};
 use delaunator::{triangulate, Triangulation, EMPTY};
 pub use iterator::{CellPathIterator, NeighborSiteIterator, TopologicalNeighborSiteIterator};
+pub use robust;
 pub use voronoi_builder::VoronoiBuilder;
 pub use voronoi_cell::VoronoiCell;
 
 use self::{cell_builder::*, utils::cicumcenter};
+
+#[derive(thiserror::Error, Debug, Clone, Eq, PartialEq)]
+pub enum VoronoiceError {
+    #[error("Polygon is not both convex and oriented counter-clockwise.")]
+    PolygonNotConvexAndCCW,
+
+    #[error("Voronoice error: {0}")]
+    Unspecified(String),
+}
 
 /// The dual Delaunay-Voronoi graph.
 ///
@@ -103,7 +112,11 @@ impl<T: ConvexBoundary> std::fmt::Debug for Voronoi<T> {
 // For instances, diag.triangles.len() is the number of starting edges and triangles in the triangulation, you can think of diag.triangles[e] as 'e' as being both the index of the
 // starting edge and the triangle it represents. When dealing with an arbitraty edge, it may not be a starting edge. You can get the starting edge by dividing the edge by 3 and flooring it.
 impl<T: ConvexBoundary> Voronoi<T> {
-    fn new(sites: Vec<Point>, boundary: T, clip_behavior: ClipBehavior) -> Option<Self> {
+    fn new(
+        sites: Vec<Point>,
+        boundary: T,
+        clip_behavior: ClipBehavior,
+    ) -> Result<Self, VoronoiceError> {
         // remove any points not within the boundary
         let sites = match clip_behavior {
             ClipBehavior::RemoveSitesOutsideBoundaryOnly | ClipBehavior::Clip => sites
@@ -119,7 +132,9 @@ impl<T: ConvexBoundary> Voronoi<T> {
         // 3 * t, 3 * t + 1 and 3 * t + 2 are the vertices of a triangle in this vector
         let num_of_triangles = triangulation.triangles.len() / 3;
         if num_of_triangles == 0 {
-            return None;
+            return Err(VoronoiceError::Unspecified(
+                "No triangles found in triangulation".to_string(),
+            ));
         }
 
         // calculate circuncenter of each triangle, these will be the vertices of the voronoi cells
@@ -141,9 +156,9 @@ impl<T: ConvexBoundary> Voronoi<T> {
             boundary.clone(),
             clip_behavior,
         );
-        let result = cell_builder.build();
+        let result = cell_builder.build()?;
 
-        Some(Voronoi {
+        Ok(Voronoi {
             boundary,
             site_to_incoming_leftmost_halfedge: result.site_to_incoming_leftmost_halfedge,
             triangulation,
@@ -320,7 +335,7 @@ mod tests {
             .build();
 
         assert!(
-            voronoi.is_none(),
+            voronoi.is_err(),
             "Collinear points do not generate valid voronoi"
         );
     }

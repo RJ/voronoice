@@ -1,7 +1,87 @@
+use crate::VoronoiceError;
+
 use super::{utils::calculate_approximated_cetroid, ClipBehavior, ConvexBoundary, Point, Voronoi};
 
+#[cfg(test)]
+mod test {
+    use crate::VoroConvexPolygon;
+
+    use super::*;
+    // cargo test -F debug_logs -- --nocapture test_ship
+
+    #[test]
+    fn test_ship_b() {
+        let voro_poly = VoroConvexPolygon::new(vec![
+            Point { x: -8.0, y: 4.5 },
+            Point { x: 8.0, y: 1.0 },
+            Point { x: 8.0, y: -1.0 },
+            Point { x: -8.0, y: -4.5 },
+        ])
+        .unwrap();
+        let sites = vec![
+            Point {
+                x: -7.503430309050114,
+                y: -4.172578417788284,
+            },
+            Point {
+                x: 2.809412810263112,
+                y: 0.2749889374297019,
+            },
+            Point {
+                x: 5.182620972241436,
+                y: -0.06919241377433583,
+            },
+            Point {
+                x: -4.435023309200537,
+                y: 1.5135125885340561,
+            },
+        ];
+        // build the voronoi diagram
+        let voronoi_builder = VoronoiBuilder::default()
+            .set_sites(sites)
+            .set_boundary(voro_poly)
+            .set_lloyd_relaxation_iterations(5);
+        let voronoi = voronoi_builder.build();
+        println!("voronoi: {:?}", voronoi);
+        assert!(voronoi.is_ok());
+    }
+
+    #[test]
+    fn test_ship_a() {
+        let voro_poly = VoroConvexPolygon::new(vec![
+            Point { x: -8.0, y: 4.5 },
+            Point { x: 8.0, y: 1.0 },
+            Point { x: 8.0, y: -1.0 },
+            Point { x: -8.0, y: -4.5 },
+        ])
+        .unwrap();
+        let sites = vec![
+            Point {
+                x: -4.365231898088616,
+                y: -0.846844311477932,
+            },
+            Point {
+                x: -3.3197399607919005,
+                y: 1.636919612879272,
+            },
+            Point {
+                x: -2.3466772288279802,
+                y: -2.892141204375935,
+            },
+        ];
+        // build the voronoi diagram
+        let voronoi_builder = VoronoiBuilder::default()
+            .set_sites(sites)
+            .set_boundary(voro_poly)
+            .set_lloyd_relaxation_iterations(4);
+        let voronoi = voronoi_builder.build();
+        println!("voronoi: {:?}", voronoi);
+        assert!(voronoi.is_ok());
+    }
+}
+
 /// Provides a convenient way to construct a Voronoi diagram.
-#[derive(Default)]
+#[derive(Default, Debug, Clone)]
 pub struct VoronoiBuilder<T: ConvexBoundary> {
     sites: Option<Vec<Point>>,
     lloyd_iterations: usize,
@@ -62,37 +142,38 @@ impl<T: ConvexBoundary> VoronoiBuilder<T> {
     /// # Panics
     ///
     /// Panics if no sites have been provided through [Self::set_sites] or one of the generate_*_sites methods.
-    pub fn build(mut self) -> Option<Voronoi<T>> {
+    pub fn build(mut self) -> Result<Voronoi<T>, VoronoiceError> {
         let v = Voronoi::new(
             self.sites
                 .take()
                 .expect("Cannot build voronoi without sites. Call set_sites() first."),
             self.boundary.clone(),
             self.clip_behavior,
-        );
+        )?;
 
         self.perform_lloyd_relaxation(v)
     }
 
-    fn perform_lloyd_relaxation(&mut self, mut v: Option<Voronoi<T>>) -> Option<Voronoi<T>> {
+    fn perform_lloyd_relaxation(
+        &mut self,
+        mut v: Voronoi<T>,
+    ) -> Result<Voronoi<T>, VoronoiceError> {
         for _ in 0..self.lloyd_iterations {
-            if let Some(voronoi) = v {
-                // get vertices for each cell and approximate centroid
-                let new_sites = voronoi
-                    .iter_cells()
-                    .map(|c| calculate_approximated_cetroid(c.iter_vertices()))
-                    .collect::<Vec<Point>>();
+            let voronoi: &Voronoi<T> = &v;
 
-                // recompute new voronoi with sites after relaxation
-                v = Self::create_builder_from_voronoi_without_sites(&voronoi)
-                    .set_sites(new_sites)
-                    .build();
-            } else {
-                break;
-            }
+            // get vertices for each cell and approximate centroid
+            let new_sites = voronoi
+                .iter_cells()
+                .map(|c| calculate_approximated_cetroid(c.iter_vertices()))
+                .collect::<Vec<Point>>();
+
+            // recompute new voronoi with sites after relaxation
+            v = Self::create_builder_from_voronoi_without_sites(&voronoi)
+                .set_sites(new_sites)
+                .build()?;
         }
 
-        v
+        Ok(v)
     }
 
     /// Generates sites in the format of a circle centered at the origin with ```size``` points and radius ```radius```.

@@ -5,7 +5,7 @@ use super::{
     utils::{self, site_of_incoming},
     ClipBehavior, Point,
 };
-use crate::{boundary, utils::triangle_of_edge, ConvexBoundary};
+use crate::{boundary, utils::triangle_of_edge, ConvexBoundary, VoronoiceError};
 
 const VORONOI_INFINITY: f64 = 1e+10_f64;
 
@@ -67,19 +67,19 @@ impl<'t, T: ConvexBoundary> CellBuilder<'t, T> {
         }
     }
 
-    pub fn build(mut self) -> CellBuilderResult {
+    pub fn build(mut self) -> Result<CellBuilderResult, VoronoiceError> {
         // adds the vertices of the boundary as potential vertices for the voronoi
         if self.clip_behavior == ClipBehavior::Clip {
             self.calculate_boundary_vertices();
         }
 
-        let cells = self.build_cells();
+        let cells = self.build_cells()?;
 
-        CellBuilderResult {
+        Ok(CellBuilderResult {
             vertices: self.vertices,
             site_to_incoming_leftmost_halfedge: self.site_to_incoming_leftmost_halfedge,
             cells,
-        }
+        })
     }
 
     pub fn calculate_boundary_vertices(&mut self) {
@@ -94,7 +94,7 @@ impl<'t, T: ConvexBoundary> CellBuilder<'t, T> {
     /// Builds cells for each site.
     /// This won't extend not close the hull.
     /// This will not clip any edges to the bounding geometry.
-    fn build_cells(&mut self) -> Vec<Vec<usize>> {
+    fn build_cells(&mut self) -> Result<Vec<Vec<usize>>, VoronoiceError> {
         let triangulation = self.triangulation;
         let sites: &Vec<Point> = self.sites;
         let num_of_sites = sites.len();
@@ -128,7 +128,7 @@ impl<'t, T: ConvexBoundary> CellBuilder<'t, T> {
                 let hull_cell = &mut cells[hull_site];
                 tmp_cell.clear();
                 std::mem::swap(hull_cell, &mut tmp_cell);
-                self.clip_cell(&tmp_cell, hull_cell, hull_site);
+                self.clip_cell(&tmp_cell, hull_cell, hull_site)?;
             }
         }
 
@@ -140,9 +140,9 @@ impl<'t, T: ConvexBoundary> CellBuilder<'t, T> {
 
             // if cell is empty, it hasn't been processed yet
             if cell.len() == 0 {
-                #[cfg(debug_logs)]
+                #[cfg(feature = "debug_logs")]
                 println!();
-                #[cfg(debug_logs)]
+                #[cfg(feature = "debug_logs")]
                 println!("Site: {site}.");
 
                 let circumcenter_iter =
@@ -150,30 +150,34 @@ impl<'t, T: ConvexBoundary> CellBuilder<'t, T> {
                 if self.clip_behavior == ClipBehavior::Clip {
                     tmp_cell.clear();
                     tmp_cell.extend(circumcenter_iter);
-                    self.clip_cell(&tmp_cell, cell, site);
+                    self.clip_cell(&tmp_cell, cell, site)?;
                 } else {
                     cell.extend(circumcenter_iter);
                     cell.reverse();
                 }
 
-                #[cfg(debug_logs)]
+                #[cfg(feature = "debug_logs")]
                 println!("  [{site}/{edge}] Cell: {:?}", cell);
             }
         }
 
-        cells
+        Ok(cells)
     }
 
-    fn clip_cell(&mut self, tmp_cell: &Vec<usize>, cell: &mut Vec<usize>, site: usize) {
-        #[cfg(debug_logs)]
+    fn clip_cell(
+        &mut self,
+        tmp_cell: &[usize],
+        cell: &mut Vec<usize>,
+        site: usize,
+    ) -> Result<(), VoronoiceError> {
+        #[cfg(feature = "debug_logs")]
         println!("  Temp: {:?}", tmp_cell);
 
         // find the first vertex inside the boundary
         let (first_index, first, first_inside) = if let Some(inside) = tmp_cell
             .iter()
             .enumerate()
-            .filter(|(_, &c)| self.is_vertex_inside_boundary(c))
-            .next()
+            .find(|(_, &c)| self.is_vertex_inside_boundary(c))
         {
             (inside.0, *inside.1, true)
         } else {
@@ -185,7 +189,7 @@ impl<'t, T: ConvexBoundary> CellBuilder<'t, T> {
         let mut prev = first;
         let mut prev_inside = first_inside;
         let mut cell_open = false; // everytime we leave the cell, we leave it open and we need to close it
-        #[cfg(debug_logs)]
+        #[cfg(feature = "debug_logs")]
         println!("  Start: Temp[{first_index}] = {first}.");
         for &c in tmp_cell
             .iter()
@@ -205,21 +209,37 @@ impl<'t, T: ConvexBoundary> CellBuilder<'t, T> {
                         if cell_open {
                             // an edge crossing the box still leaves the cell open, but it may be able to wrap around a boundary vertex
                             // this is an edge case, see degerated10.json input
-                            self.insert_edge_and_wrap_around_boundary_vertices(site, cell,
-                                *cell.last().expect("Cell must not be empty because we started from a vertex inside the boundary."),
-                                first_clip);
-                            #[cfg(debug_logs)]
+                            let Some(last_cell_vertex) = cell.last() else {
+                                return Err(VoronoiceError::Unspecified(
+                                    "Cell must not be empty because we started from a vertex inside the boundary.".to_string()
+                                ));
+                            };
+                            self.insert_edge_and_wrap_around_boundary_vertices(
+                                site,
+                                cell,
+                                *last_cell_vertex,
+                                first_clip,
+                            )?;
+                            #[cfg(feature = "debug_logs")]
                             println!("  [{site}] Edge {prev} -> {c}. Edge outside box. The box was open.");
                         }
-                        #[cfg(debug_logs)]
+                        #[cfg(feature = "debug_logs")]
                         println!("  [{site}] Edge {prev} -> {c}. First clip: {first_clip}. Second clip: {}", second_clip.unwrap_or_default());
-                        self.insert_edge_and_wrap_around_boundary_vertices(site, cell,
-                           first_clip,
-                second_clip.expect("Two intersection points need to occur when a line crosses the convex boundary"));
-                        #[cfg(debug_logs)]
-                        println!("  [{site}] Edge {prev} -> {c}. Edge outside box. Entered at {} and left at {}", first_clip, second_clip.unwrap());
+                        let Some(second_clip) = second_clip else {
+                            return Err(VoronoiceError::Unspecified(
+                                "Two intersection points need to occur when a line crosses the convex boundary".to_string()
+                            ));
+                        };
+                        self.insert_edge_and_wrap_around_boundary_vertices(
+                            site,
+                            cell,
+                            first_clip,
+                            second_clip,
+                        )?;
+                        #[cfg(feature = "debug_logs")]
+                        println!("  [{site}] Edge {prev} -> {c}. Edge outside box. Entered at {} and left at {}", first_clip, second_clip);
                     } else {
-                        #[cfg(debug_logs)]
+                        #[cfg(feature = "debug_logs")]
                         println!(
                             "  [{site}] Edge {prev} -> {c}. Edge outside box, no intersection."
                         );
@@ -234,10 +254,10 @@ impl<'t, T: ConvexBoundary> CellBuilder<'t, T> {
                     debug_assert!(second_clip.is_none(), "Cannot have two intersections with the boundary when one of the edge's vertex is inside the boundary");
                     self.insert_edge_and_wrap_around_boundary_vertices(site, cell,
                         *cell.last().expect("Cell must not be empty because we started from a vertex inside the boundary."),
-                       first_clip);
+                       first_clip)?;
                     cell_open = false;
-                    #[cfg(debug_logs)]
-                    println!("  [{site}] Edge {prev} -> {c}: Entering box at {first_clip} (previously left from {})");
+                    #[cfg(feature = "debug_logs")]
+                    println!("  [{site}] Edge {prev} -> {c}: Entering box at {first_clip} (previously left from {})", cell.last().unwrap());
                 }
 
                 // leaving boundary - edge crosses boundary edge from the inside
@@ -250,13 +270,13 @@ impl<'t, T: ConvexBoundary> CellBuilder<'t, T> {
                     cell.push(prev);
                     cell.push(first_clip);
                     cell_open = true;
-                    #[cfg(debug_logs)]
+                    #[cfg(feature = "debug_logs")]
                     println!("  [{site}] Edge {prev} -> {c}: Leaving box. Added {prev} and clipped at {}", cell.last().unwrap());
                 }
 
                 // edge inside box
                 (true, true) => {
-                    #[cfg(debug_logs)]
+                    #[cfg(feature = "debug_logs")]
                     println!("  [{site}] Edge {prev} -> {c}: Inside box. Added {prev}.");
                     cell.push(prev);
                 }
@@ -265,6 +285,7 @@ impl<'t, T: ConvexBoundary> CellBuilder<'t, T> {
             prev = c;
             prev_inside = inside;
         }
+        Ok(())
     }
 
     /// Clip a voronoi edge on the edge of the bounding geometry, if the edge crosses the boundary.
@@ -280,7 +301,7 @@ impl<'t, T: ConvexBoundary> CellBuilder<'t, T> {
             y: b_pos.y - a_pos.y,
         };
 
-        let result = match self.boundary.project_ray(a_pos, a_to_b) {
+        match self.boundary.project_ray(a_pos, a_to_b) {
             // single intersection (i.e a is inside boundary and b is outside)
             (Some(first_clip), None) => {
                 // insert intersection and return
@@ -304,9 +325,7 @@ impl<'t, T: ConvexBoundary> CellBuilder<'t, T> {
 
             // no intersection
             (None, None) => (None, None),
-        };
-
-        result
+        }
     }
 
     /// Given two vertices on the bounding geometry (first clip and second clip) check whether there is a need to add the boundary vertices in the cell
@@ -316,7 +335,7 @@ impl<'t, T: ConvexBoundary> CellBuilder<'t, T> {
         cell: &mut Vec<usize>,
         first_clip: usize,
         second_clip: usize,
-    ) {
+    ) -> Result<(), VoronoiceError> {
         if cell.last() != Some(&first_clip) {
             cell.push(first_clip);
         }
@@ -324,12 +343,22 @@ impl<'t, T: ConvexBoundary> CellBuilder<'t, T> {
         let first_edge = self
             .boundary
             .which_edge(&self.vertices[first_clip])
-            .expect("First clipped value is expected to be on the edge of the boundary.");
+            .map_err(|e| {
+                VoronoiceError::Unspecified(format!(
+                    "First clipped value is expected to be on the edge of the boundary: {}",
+                    e
+                ))
+            })?;
         let second_edge = self
             .boundary
             .which_edge(&self.vertices[second_clip])
-            .expect("Second clipped value is expected to be on the edge of the boundary.");
-        #[cfg(debug_logs)]
+            .map_err(|e| {
+                VoronoiceError::Unspecified(format!(
+                    "Second clipped value is expected to be on the edge of the boundary: {}. second_clip vertex is {:?} and boundary shape is: {:?}",
+                    e,&self.vertices[second_clip], self.boundary
+                ))
+            })?;
+        #[cfg(feature = "debug_logs")]
         let len = cell.len();
 
         // first_edge is to the right of first_clip -> second_clip
@@ -357,8 +386,9 @@ impl<'t, T: ConvexBoundary> CellBuilder<'t, T> {
             cell.push(second_clip);
         }
 
-        #[cfg(debug_logs)]
+        #[cfg(feature = "debug_logs")]
         println!("  [{site}] Edge {first_clip} ({first_edge}) -> {second_clip} ({second_edge}). Wrapping around {:?}", &cell[len-1..]);
+        Ok(())
     }
 
     fn extend_voronoi_vertex(&mut self, hull_edge: usize) -> usize {
@@ -392,7 +422,7 @@ impl<'t, T: ConvexBoundary> CellBuilder<'t, T> {
         };
         let v = self.add_new_vertex(projected);
 
-        #[cfg(debug_logs)]
+        #[cfg(feature = "debug_logs")]
         println!("  Hull edge {hull_edge} (circumcenter {circumcenter}) extended orthogonally to {a} -> {b} at {}", v);
         v
     }

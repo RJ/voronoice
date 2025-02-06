@@ -1,5 +1,8 @@
 use super::{ConvexBoundary, Point};
-use crate::utils::{abs_diff_eq, EQ_EPSILON};
+use crate::{
+    utils::{abs_diff_eq, EQ_EPSILON},
+    VoronoiceError,
+};
 
 /// Defines a rectangular bounding box.
 ///
@@ -133,23 +136,23 @@ impl ConvexBoundary for BoundingBox {
     }
 
     #[inline]
-    fn which_edge(&self, point: &Point) -> Option<usize> {
+    fn which_edge(&self, point: &Point) -> Result<usize, VoronoiceError> {
         if abs_diff_eq(point.y, self.top(), EQ_EPSILON) {
             // top
-            Some(0)
+            Ok(0)
         } else if abs_diff_eq(point.y, self.bottom(), EQ_EPSILON) {
             // bottom
-            Some(2)
+            Ok(2)
+        } else if abs_diff_eq(point.x, self.right(), EQ_EPSILON) {
+            // right
+            Ok(3)
+        } else if abs_diff_eq(point.x, self.left(), EQ_EPSILON) {
+            // left
+            Ok(1)
         } else {
-            if abs_diff_eq(point.x, self.right(), EQ_EPSILON) {
-                // right
-                Some(3)
-            } else if abs_diff_eq(point.x, self.left(), EQ_EPSILON) {
-                // left
-                Some(1)
-            } else {
-                None
-            }
+            Err(VoronoiceError::Unspecified(
+                "Point not on any edge (bounding box)".to_string(),
+            ))
         }
     }
 

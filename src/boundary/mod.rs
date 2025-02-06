@@ -4,7 +4,9 @@ mod convex_polygon;
 use std::{fmt::Display, str::FromStr};
 
 pub use bounding_box::BoundingBox;
-pub use convex_polygon::ConvexPolygon;
+pub use convex_polygon::VoroConvexPolygon;
+
+use crate::VoronoiceError;
 
 use super::Point;
 
@@ -58,7 +60,7 @@ pub trait ConvexBoundary: std::fmt::Debug + Default + Clone {
     /// Same as [Self::is_inside()], but returns false if point is on the box edge.
     #[inline]
     fn is_exclusively_inside(&self, point: &Point) -> bool {
-        self.is_inside(point) && self.which_edge(point).is_none()
+        self.is_inside(point) && self.which_edge(point).is_err()
     }
 
     /// Returns the index of the vertex representing the edge ```point``` is on.
@@ -67,7 +69,7 @@ pub trait ConvexBoundary: std::fmt::Debug + Default + Clone {
     ///
     /// # Example
     /// In a [BoundingBox], if `point` is on middle of the top edge, the top left corner will be returned.
-    fn which_edge(&self, point: &Point) -> Option<usize>;
+    fn which_edge(&self, point: &Point) -> Result<usize, VoronoiceError>;
 
     fn next_edge(&self, edge: usize) -> usize {
         (edge + 1) % self.vertices().len()
