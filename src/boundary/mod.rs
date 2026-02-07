@@ -14,6 +14,7 @@ use super::Point;
 ///
 /// Clipping is necessary to guarantee that all Voronoi vertices are within the convex boundary.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Default)]
 pub enum ClipBehavior {
     /// No clipping will be performed. Any sites outside the convex boundary will still be used for diagram generation.
     None,
@@ -22,14 +23,10 @@ pub enum ClipBehavior {
     RemoveSitesOutsideBoundaryOnly,
 
     /// Removes sites outside convex boundary and clips any Voronoi cell edges that fall outside of the convex boundary.
+    #[default]
     Clip,
 }
 
-impl Default for ClipBehavior {
-    fn default() -> Self {
-        ClipBehavior::Clip
-    }
-}
 
 impl Display for ClipBehavior {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

@@ -84,7 +84,7 @@ impl<'t> TopologicalNeighborSiteIterator<'t> {
             .get(site)
             .expect("Site does not exist");
         Self {
-            iter: EdgesAroundSiteIterator::new(&triangulation, incoming_leftmost_edge),
+            iter: EdgesAroundSiteIterator::new(triangulation, incoming_leftmost_edge),
             last_incoming: EMPTY,
         }
     }
@@ -264,7 +264,7 @@ pub fn shortest_path_iter<'v, T: ConvexBoundary>(
 ) -> impl Iterator<Item = usize> + 'v {
     shortest_path_iter_from_triangulation(
         voronoi.triangulation(),
-        &voronoi.sites(),
+        voronoi.sites(),
         &voronoi.site_to_incoming_leftmost_halfedge,
         start_site,
         dest,

@@ -153,7 +153,7 @@ impl ConvexBoundary for VoroConvexPolygon {
                 }
             }
         }
-        return (found, None);
+        (found, None)
     }
 }
 
@@ -188,7 +188,6 @@ impl VoroConvexPolygon {
         let step = 2.0 * std::f64::consts::PI / n as f64;
         Self::new(
             (0..n)
-                .into_iter()
                 .map(|i| Point {
                     x: f64::cos(-(i as f64) * step - phase) * radius,
                     y: f64::sin(-(i as f64) * step - phase) * radius,
@@ -213,17 +212,15 @@ mod test {
     }
 
     #[test]
-    #[should_panic]
     fn test_clockwise_construction_panics() {
-        VoroConvexPolygon::new(dented_box().into_iter().rev().collect());
+        assert!(VoroConvexPolygon::new(dented_box().into_iter().rev().collect()).is_err());
     }
 
     #[test]
-    #[should_panic]
     fn test_concave_construction_panics() {
         let mut concave = dented_box();
         concave.insert(3, Point { x: 0.0, y: 0.0 });
-        VoroConvexPolygon::new(concave);
+        assert!(VoroConvexPolygon::new(concave).is_err());
     }
 
     #[test]

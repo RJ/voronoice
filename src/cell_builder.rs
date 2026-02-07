@@ -44,8 +44,8 @@ impl<'t, T: ConvexBoundary> CellBuilder<'t, T> {
 
         let boundary_vertex_ownership = if clip_behavior == ClipBehavior::Clip {
             calculate_boundary_vertex_ownership(
-                &boundary.vertices(),
-                &triangulation,
+                boundary.vertices(),
+                triangulation,
                 sites,
                 &site_to_incoming_leftmost_halfedge,
             )
@@ -139,7 +139,7 @@ impl<'t, T: ConvexBoundary> CellBuilder<'t, T> {
             let cell = &mut cells[site];
 
             // if cell is empty, it hasn't been processed yet
-            if cell.len() == 0 {
+            if cell.is_empty() {
                 #[cfg(feature = "debug_logs")]
                 println!();
                 #[cfg(feature = "debug_logs")]
@@ -498,7 +498,7 @@ fn calculate_incoming_edges(triangulation: &Triangulation, num_of_sites: usize) 
     let mut site_to_incoming_leftmost_halfedge = vec![EMPTY; num_of_sites];
 
     for e in 0..triangulation.triangles.len() {
-        let s = site_of_incoming(&triangulation, e);
+        let s = site_of_incoming(triangulation, e);
         if site_to_incoming_leftmost_halfedge[s] == EMPTY || triangulation.halfedges[e] == EMPTY {
             site_to_incoming_leftmost_halfedge[s] = e;
         }
@@ -506,7 +506,7 @@ fn calculate_incoming_edges(triangulation: &Triangulation, num_of_sites: usize) 
 
     // if input sites has lot of coincident points (very very close), the underlying triangulation will be problematic and those points may be ignored in the triangulation
     // thus they won't be reacheable and this will lead to problems down the line as we build the voronoi graph
-    debug_assert!(!site_to_incoming_leftmost_halfedge.iter().any(|e| *e == EMPTY), "One or more sites is not reacheable in the triangulation mesh. This usually indicate coincident points.");
+    debug_assert!(!site_to_incoming_leftmost_halfedge.contains(&EMPTY), "One or more sites is not reacheable in the triangulation mesh. This usually indicate coincident points.");
 
     site_to_incoming_leftmost_halfedge
 }

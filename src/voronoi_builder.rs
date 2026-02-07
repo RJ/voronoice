@@ -168,7 +168,7 @@ impl<T: ConvexBoundary> VoronoiBuilder<T> {
                 .collect::<Vec<Point>>();
 
             // recompute new voronoi with sites after relaxation
-            v = Self::create_builder_from_voronoi_without_sites(&voronoi)
+            v = Self::create_builder_from_voronoi_without_sites(voronoi)
                 .set_sites(new_sites)
                 .build()?;
         }

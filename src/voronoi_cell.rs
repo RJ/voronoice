@@ -104,7 +104,7 @@ impl<'v, T: ConvexBoundary> VoronoiCell<'v, T> {
     /// assert_eq!(neighbors[2], 3);
     ///```
     #[inline]
-    pub fn iter_neighbors(&self) -> NeighborSiteIterator<T> {
+    pub fn iter_neighbors(&self) -> NeighborSiteIterator<'_, T> {
         NeighborSiteIterator::new(self.voronoi, self.site)
     }
 
@@ -170,7 +170,7 @@ impl<'v, T: ConvexBoundary> fmt::Debug for VoronoiCell<'v, T> {
             .field(
                 "vertices",
                 &Cellvertices {
-                    triangles: self.triangles().iter().copied().collect(),
+                    triangles: self.triangles().to_vec(),
                     positions: self
                         .triangles()
                         .iter()

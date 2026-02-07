@@ -189,7 +189,7 @@ impl<T: ConvexBoundary> Voronoi<T> {
     ///     v.cell(0).iter_vertices().collect::<Vec<&Point>>());
     ///```
     #[inline]
-    pub fn cell(&self, site: usize) -> VoronoiCell<T> {
+    pub fn cell(&self, site: usize) -> VoronoiCell<'_, T> {
         VoronoiCell::new(site, self)
     }
 
